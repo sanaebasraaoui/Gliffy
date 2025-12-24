@@ -1,0 +1,47 @@
+# Rapports générés avec données personnelles
+reports/
+migration_report.json
+gliffy_pages.json
+tids_mapping.json
+
+# Images et fichiers téléchargés
+gliffy_images/
+tid_images/
+output/
+*.excalidraw
+
+# Fichiers Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environnements virtuels
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Fichiers temporaires
+*.tmp
+*.bak
+
+# Fichiers de configuration personnels
+.env
+.env.local
+config.local.json
