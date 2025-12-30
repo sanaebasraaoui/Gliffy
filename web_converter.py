@@ -75,6 +75,9 @@ if SECURITY_AVAILABLE:
             # Pas d'authentification configurée, autoriser l'accès
             return True
         return username == WEB_USERNAME and password == WEB_PASSWORD
+
+    def csrf_exempt_decorator(f):
+        return csrf.exempt(f) if csrf else f
 else:
     # Mode sans sécurité (pour compatibilité)
     auth = None
@@ -83,9 +86,12 @@ else:
     WEB_USERNAME = None
     WEB_PASSWORD = None
     
-    # Décorateur factice pour auth
+    # Décorateurs factices
     def verify_password(username, password):
         return True
+        
+    def csrf_exempt_decorator(f):
+        return f
 
 # Configuration du logging sécurisé
 logging.basicConfig(
@@ -131,9 +137,10 @@ def validate_gliffy_file(file) -> Tuple[bool, str, Optional[dict]]:
         if not isinstance(gliffy_data, dict):
             return False, "Format de fichier invalide: doit être un objet JSON", None
         
-        # Vérifier la structure Gliffy minimale
-        if 'content' not in gliffy_data and 'type' not in gliffy_data:
-            return False, "Format Gliffy invalide: structure de fichier incorrecte", None
+        # Vérifier la structure Gliffy minimale (doit avoir un marqueur type de Gliffy)
+        gliffy_keys = ['stage', 'pages', 'content', 'type', 'contentType', 'version']
+        if not any(k in gliffy_data for k in gliffy_keys):
+            return False, "Format Gliffy invalide: structure de fichier non reconnue", None
         
         return True, "", gliffy_data
         
@@ -505,12 +512,24 @@ HTML_TEMPLATE = """
             try {
                 const response = await fetch('/convert', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
                 });
                 
                 if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Erreur lors de la conversion');
+                    let errorMessage = 'Erreur lors de la conversion';
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/json") !== -1) {
+                        const error = await response.json();
+                        errorMessage = error.error || errorMessage;
+                    } else {
+                        const text = await response.text();
+                        console.error("Réponse serveur non-JSON reçue:", text);
+                        errorMessage = `Erreur serveur (${response.status})`;
+                    }
+                    throw new Error(errorMessage);
                 }
                 
                 const blob = await response.blob();
@@ -554,6 +573,7 @@ def index():
 
 
 @app.route('/convert', methods=['POST'])
+@csrf_exempt_decorator
 def convert():
     """
     Endpoint pour convertir un ou plusieurs fichiers Gliffy en Excalidraw.
@@ -657,6 +677,17 @@ def convert():
         # Gestion d'erreur globale sécurisée
         logger.error(f"Erreur inattendue dans convert: {type(e).__name__}")
         return jsonify({'error': 'Une erreur interne est survenue'}), 500
+
+
+# Gestionnaire d'erreurs global pour l'API pour éviter les réponses HTML
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({"error": "Trop de requêtes. Veuillez réessayer plus tard."}), 429
+
+
+@app.errorhandler(500)
+def internal_error_handler(e):
+    return jsonify({"error": "Erreur interne du serveur."}), 500
 
 
 def run_server(host='127.0.0.1', port=5000, debug=False):
