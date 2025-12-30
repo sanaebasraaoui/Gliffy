@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
 Script pour identifier les pages Confluence contenant des macros Gliffy.
-Utilise uniquement l'API Confluence, pas de navigateur.
+
+Ce module scanne une instance Confluence pour trouver toutes les pages contenant
+des diagrammes Gliffy, en utilisant uniquement l'API REST Confluence.
+
+Fonctionnalités :
+- Détection des macros Gliffy dans les pages
+- Recherche dans le contenu source (body.storage) et rendu HTML
+- Support de tous les espaces ou espaces spécifiques
+- Génération de rapports détaillés
+
+Auteur: Sanae Basraoui
 """
 
 import argparse

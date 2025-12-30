@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """
 CLI principal pour l'application Gliffy.
-Expose trois commandes distinctes :
-1. scan - Scan global de Confluence (inventaire)
+
+Ce module expose une interface en ligne de commande pour gérer les diagrammes Gliffy
+dans Confluence et les convertir vers Excalidraw.
+
+Commandes disponibles :
+1. scan - Scan global de Confluence (inventaire complet des pages)
 2. migrate - Migration des images Gliffy dans les pages Confluence
 3. web - Interface web pour la conversion Gliffy → Excalidraw
+
+Auteur: Sanae Basraoui
 """
+
 
 import argparse
 import sys
@@ -16,7 +23,17 @@ from web_converter import run_server
 
 
 def parse_common_args(parser):
-    """Ajoute les arguments communs à toutes les commandes Confluence."""
+    """
+    Ajoute les arguments communs à toutes les commandes Confluence.
+    
+    Args:
+        parser: L'objet ArgumentParser auquel ajouter les arguments
+        
+    Les arguments ajoutés sont :
+    - --url : URL de base de Confluence (requis)
+    - --username : Nom d'utilisateur ou email Confluence (requis)
+    - --token : Token API Confluence (requis)
+    """
     parser.add_argument(
         '--url',
         required=True,
@@ -35,7 +52,26 @@ def parse_common_args(parser):
 
 
 def cmd_scan(args):
-    """Commande pour scanner Confluence et créer un inventaire."""
+    """
+    Commande pour scanner Confluence et créer un inventaire.
+    
+    Cette fonction lance le scan de Confluence et génère un inventaire
+    complet des pages avec leurs métadonnées (création, modification,
+    hiérarchie, présence de Gliffy, etc.).
+    
+    Args:
+        args: Arguments de la ligne de commande contenant :
+            - url: URL de Confluence
+            - username: Nom d'utilisateur
+            - token: Token API
+            - spaces: Liste d'espaces à scanner (optionnel)
+            - page: ID de page spécifique (optionnel)
+            - format: Format d'export (txt/json)
+            - output: Nom du fichier de sortie
+    
+    Returns:
+        int: Code de retour (0 = succès, 1 = erreur)
+    """
     scanner = ConfluenceScanner(
         confluence_url=args.url,
         username=args.username,
@@ -62,31 +98,72 @@ def cmd_scan(args):
 
 
 def cmd_migrate(args):
-    """Commande pour migrer les images Gliffy dans les pages Confluence."""
+    """
+    Commande pour migrer les images Gliffy dans les pages Confluence.
+    
+    Cette fonction lance la migration des images Gliffy depuis les attachments
+    Confluence et les insère directement dans les pages sous les diagrammes.
+    
+    Args:
+        args: Arguments de la ligne de commande contenant :
+            - url: URL de Confluence
+            - username: Nom d'utilisateur
+            - token: Token API
+            - spaces: Liste d'espaces à traiter (optionnel)
+            - page: ID de page spécifique (optionnel)
+            - report: Nom du fichier de rapport (optionnel)
+            - force: Forcer la réinsertion même si déjà présent (optionnel)
+    
+    Returns:
+        int: Code de retour (0 = succès)
+    """
     migrator = GliffyMigrator(
         confluence_url=args.url,
         username=args.username,
         api_token=args.token,
         spaces=args.spaces,
-        page_id=args.page
+        page_id=args.page,
+        force=args.force
     )
     
     report = migrator.migrate()
     
-    if args.report:
-        migrator.export_report(args.report)
+    # Toujours exporter le rapport (avec le nom par défaut si non spécifié)
+    migrator.export_report(args.report)
     
     return 0
 
 
 def cmd_web(args):
-    """Commande pour lancer l'interface web de conversion."""
+    """
+    Commande pour lancer l'interface web de conversion.
+    
+    Cette fonction démarre le serveur Flask pour l'interface web permettant
+    de convertir des fichiers Gliffy en Excalidraw via une interface graphique.
+    
+    Args:
+        args: Arguments de la ligne de commande contenant :
+            - host: Adresse IP du serveur (défaut: 127.0.0.1)
+            - port: Port du serveur (défaut: 5000)
+            - debug: Mode debug (optionnel)
+    
+    Returns:
+        int: Code de retour (0 = succès)
+    """
     run_server(host=args.host, port=args.port, debug=args.debug)
     return 0
 
 
 def main():
-    """Point d'entrée principal du CLI."""
+    """
+    Point d'entrée principal du CLI.
+    
+    Cette fonction configure le parser d'arguments, définit les sous-commandes
+    (scan, migrate, web) et leurs options, puis exécute la commande demandée.
+    
+    Returns:
+        int: Code de retour (0 = succès, 1 = erreur)
+    """
     parser = argparse.ArgumentParser(
         description='Application Gliffy - Outils pour Confluence et Excalidraw',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -110,6 +187,9 @@ Exemples d'utilisation:
 
   # Migrer les images Gliffy dans une page spécifique
   python cli.py migrate --url https://confluence.example.com --username user --token TOKEN --page 123456
+
+  # Forcer la réinsertion des images (même si déjà présentes)
+  python cli.py migrate --url https://confluence.example.com --username user --token TOKEN --spaces DEV --force
 
   # Lancer l'interface web de conversion
   python cli.py web --host 0.0.0.0 --port 5000
@@ -164,6 +244,11 @@ Exemples d'utilisation:
         '--report',
         default='migration_report.json',
         help='Fichier de rapport de migration (défaut: migration_report.json)'
+    )
+    migrate_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Forcer la réinsertion des images même si elles existent déjà (ignore l\'idempotence)'
     )
     
     # Commande web

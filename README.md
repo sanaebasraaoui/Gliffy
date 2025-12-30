@@ -2,6 +2,9 @@
 
 Application en ligne de commande pour gérer les diagrammes Gliffy dans Confluence et les convertir vers Excalidraw.
 
+> [!CAUTION]
+> **⚠️ Avertissement important** : Ce projet a été développé dans un délai très court et n'a pas encore bénéficié de tests approfondis sur tous les types de configurations Confluence. Bien que les fonctionnalités de base soient opérationnelles, des régressions ou des comportements imprévus peuvent survenir. **Il est fortement recommandé d'utiliser cet outil avec précaution et de tester les opérations de migration sur un espace de test avant toute exécution en production.**
+
 ## 📋 Vue d'ensemble
 
 Cette application expose **trois fonctionnalités distinctes** via une interface CLI :
@@ -112,7 +115,7 @@ Pour chaque page, l'inventaire contient :
 
 Copie les images Gliffy (pièces jointes) directement sous le diagramme Gliffy dans la page Confluence correspondante.
 
-**⚠️ Important** : Cette commande est **idempotente** - une page déjà traitée ne sera jamais modifiée une seconde fois. Vous pouvez relancer la commande sans risque.
+**⚠️ Important** : Cette commande est **idempotente** par défaut - une page déjà traitée ne sera jamais modifiée une seconde fois. Vous pouvez relancer la commande sans risque. Utilisez `--force` pour forcer la réinsertion des images même si elles existent déjà.
 
 #### Commande de base
 
@@ -128,6 +131,7 @@ python cli.py migrate \
 - `--spaces ESPACE1 ESPACE2` : Traiter uniquement certains espaces
 - `--page PAGE_ID` : Traiter une page spécifique
 - `--report FICHIER` : Fichier de rapport de migration (défaut: `migration_report.json`)
+- `--force` : Forcer la réinsertion des images même si elles existent déjà (ignore l'idempotence)
 
 #### Exemples
 
@@ -153,6 +157,14 @@ python cli.py migrate \
   --username user@example.com \
   --token TOKEN \
   --page 123456
+
+# Forcer la réinsertion des images (même si déjà présentes)
+python cli.py migrate \
+  --url https://confluence.example.com \
+  --username user@example.com \
+  --token TOKEN \
+  --spaces DEV \
+  --force
 ```
 
 #### Fonctionnement
@@ -160,7 +172,7 @@ python cli.py migrate \
 1. **Détection** : La commande identifie toutes les macros Gliffy dans les pages
 2. **Téléchargement** : Pour chaque Gliffy, télécharge l'image PNG/SVG depuis les attachments
 3. **Compression automatique** : Si l'image dépasse ~3.7 MB, elle est automatiquement compressée pour respecter la limite de 5 MB de Confluence
-4. **Vérification d'idempotence** : Vérifie si l'image a déjà été insérée (pour éviter les doublons)
+4. **Vérification d'idempotence** : Vérifie si l'image a déjà été insérée (pour éviter les doublons). Cette vérification est ignorée si `--force` est utilisé.
 5. **Insertion** : Insère l'image juste sous le diagramme Gliffy avec le titre du diagramme
 6. **Rapport** : Génère un rapport détaillé listant toutes les pages modifiées
 
@@ -444,11 +456,28 @@ python cli.py web --host 0.0.0.0 --port 8080
 pip install -r requirements.txt
 
 # Scanner Confluence (génère reports/confluence_inventory_*.txt)
-python cli.py scan --url URL --username USER --token TOKEN --spaces ESPACE
+Espace python cli.py scan --url URL --username USER --token TOKEN --spaces ESPACE
+ROOT  python cli.py scan --url URL --username USER --token TOKEN 
 
 # Migrer les images Gliffy (génère reports/migration_report_*.txt)
-python cli.py migrate --url URL --username USER --token TOKEN --report migration_report.json
-
+ROOT : python cli.py migrate --url URL --username USER --token TOKEN --report migration_report.json
+ESpace : python cli.py migrate \
+  --url https://votre-confluence.atlassian.net/wiki \
+  --username votre_email@example.com \
+  --token VOTRE_TOKEN_API \
+  --spaces DL KAN
+PAGE  : python cli.py migrate \
+  --url https://votre-confluence.atlassian.net/wiki \
+  --username votre_email@example.com \
+  --token VOTRE_TOKEN_API \
+  --page 6029593
+--force permet de forcer la copy de la PJ même si déjà traitée
+python cli.py migrate --url ... --username ... --token ... --force
 # Lancer l'interface web
 python cli.py web
 ```
+# Exemple pour Data Center
+python cli.py scan \
+  --url https://confluence.votre-entreprise.com \
+  --username votre_username \
+  --token VOTRE_TOKEN_API

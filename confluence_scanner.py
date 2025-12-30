@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
 """
 Module pour scanner Confluence et créer un inventaire complet des pages.
+
+Ce module permet de scanner une instance Confluence et de générer un inventaire
+détaillé de toutes les pages avec leurs métadonnées (création, modification,
+hiérarchie, présence de Gliffy, etc.).
+
+Fonctionnalités :
+- Scan de tous les espaces ou espaces spécifiques
+- Scan d'une page spécifique par son ID
+- Détection automatique des diagrammes Gliffy dans les pages
+- Export en format TXT (lisible) ou JSON (structuré)
+
+Auteur: Sanae Basraoui
 """
 
 import csv
 import json
+import re
 from typing import List, Dict, Optional
 from pathlib import Path
 from datetime import datetime
@@ -53,7 +66,7 @@ class ConfluenceScanner(ConfluenceBase):
     
     def get_all_pages(self, space_key: str, include_drafts: bool = True) -> List[Dict]:
         """Récupère toutes les pages d'un espace."""
-        return super().get_all_pages(space_key, include_drafts, expand='space,version,history,ancestors')
+        return super().get_all_pages(space_key, include_drafts, expand='space,version,history,ancestors,body.storage')
     
     def get_page_details(self, page_id: str) -> Optional[Dict]:
         """Récupère les détails d'une page spécifique."""
@@ -68,6 +81,38 @@ class ConfluenceScanner(ConfluenceBase):
             return dt.strftime('%Y-%m-%d %H:%M:%S')
         except:
             return date_str
+    
+    def extract_gliffy_info(self, body_storage: str) -> Dict:
+        """
+        Extrait les informations sur les Gliffy présents dans une page.
+        
+        Returns:
+            Dict avec 'count' (nombre de Gliffy) et 'titles' (liste des titres)
+        """
+        if not body_storage:
+            return {'count': 0, 'titles': []}
+        
+        gliffy_titles = []
+        
+        # Chercher les macros Gliffy et extraire leurs titres
+        gliffy_macro_pattern = r'<ac:structured-macro[^>]*ac:name=["\']gliffy["\'][^>]*>.*?</ac:structured-macro>'
+        gliffy_macros = re.findall(gliffy_macro_pattern, body_storage, re.DOTALL | re.IGNORECASE)
+        
+        for macro in gliffy_macros:
+            # Extraire le paramètre "name" qui contient le titre du diagramme
+            name_param = re.search(r'<ac:parameter[^>]*ac:name=["\']name["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
+            if name_param:
+                diagram_name = name_param.group(1).strip()
+                if diagram_name:
+                    gliffy_titles.append(diagram_name)
+            else:
+                # Si pas de nom, utiliser un titre par défaut
+                gliffy_titles.append("(sans titre)")
+        
+        return {
+            'count': len(gliffy_titles),
+            'titles': gliffy_titles
+        }
     
     def extract_page_info(self, page: Dict, space_key: str, space_name: str) -> Dict:
         """Extrait les informations d'une page pour l'inventaire."""
@@ -86,9 +131,15 @@ class ConfluenceScanner(ConfluenceBase):
         created_by_name = created_by.get('displayName', created_by.get('username', ''))
         
         last_updated = history.get('lastUpdated', {})
-        last_updated_date = last_updated.get('when', '')
-        last_updated_by = last_updated.get('by', {})
-        last_updated_by_name = last_updated_by.get('displayName', last_updated_by.get('username', ''))
+        last_updated_date = last_updated.get('when', '') if last_updated else ''
+        last_updated_by = last_updated.get('by', {}) if last_updated else {}
+        last_updated_by_name = last_updated_by.get('displayName', last_updated_by.get('username', '')) if last_updated_by else ''
+        
+        # Si lastUpdated est vide, utiliser createdDate comme fallback
+        # (certaines pages peuvent ne pas avoir de lastUpdated si jamais modifiées)
+        if not last_updated_date and created_date:
+            last_updated_date = created_date
+            last_updated_by_name = created_by_name
         
         # Ancêtres (hiérarchie)
         ancestors = page.get('ancestors', [])
@@ -100,6 +151,10 @@ class ConfluenceScanner(ConfluenceBase):
             page_url = f"{self.confluence_url.rstrip('/wiki')}/wiki/pages/viewpage.action?pageId={page_id}"
         else:
             page_url = f"{self.confluence_url}/pages/viewpage.action?pageId={page_id}"
+        
+        # Extraire les informations Gliffy
+        body_storage = page.get('body', {}).get('storage', {}).get('value', '')
+        gliffy_info = self.extract_gliffy_info(body_storage)
         
         return {
             'id': page_id,
@@ -115,7 +170,9 @@ class ConfluenceScanner(ConfluenceBase):
             'parent_id': parent_id,
             'parent_title': parent_title,
             'url': page_url,
-            'ancestors_count': len(ancestors)
+            'ancestors_count': len(ancestors),
+            'gliffy_count': gliffy_info['count'],
+            'gliffy_titles': gliffy_info['titles']
         }
     
     def scan(self) -> List[Dict]:

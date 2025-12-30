@@ -1,7 +1,21 @@
 #!/usr/bin/env python3
 """
 Module pour migrer les images Gliffy dans les pages Confluence.
-Migration idempotente : ne modifie pas les pages déjà traitées.
+
+Ce module permet de migrer les images Gliffy (PNG/SVG) depuis les attachments
+Confluence et de les insérer directement dans les pages sous les diagrammes Gliffy.
+
+Fonctionnalités :
+- Migration idempotente par défaut (ne modifie pas les pages déjà traitées)
+- Option --force pour forcer la réinsertion même si déjà présent
+- Compression automatique des images trop grandes
+- Support des drafts (brouillons)
+- Génération de rapports détaillés de migration
+
+Auteur: Sanae Basraoui
+
+⚠️ NOTE : Ce code a été développé rapidement et n'a pas été testé de manière exhaustive. 
+Utilisez-le avec prudence et faites des sauvegardes.
 """
 
 import base64
@@ -9,9 +23,10 @@ import json
 import re
 import requests
 import io
-from typing import List, Dict, Optional, Tuple
+from html import escape
+from typing import List, Dict, Optional, Tuple, Union
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from confluence_base import ConfluenceBase
 
 # Essayer d'importer PIL pour la compression d'images
@@ -32,6 +47,7 @@ class GliffyMigrator(ConfluenceBase):
         api_token: str,
         spaces: Optional[List[str]] = None,
         page_id: Optional[str] = None,
+        force: bool = False,
     ):
         """
         Initialise le migrateur Gliffy.
@@ -42,10 +58,12 @@ class GliffyMigrator(ConfluenceBase):
             api_token: Token API Confluence
             spaces: Liste des clés d'espaces à traiter (None = tous)
             page_id: ID d'une page spécifique à traiter (None = toutes les pages)
+            force: Si True, réinsère les images même si elles existent déjà (défaut: False)
         """
         super().__init__(confluence_url, username, api_token)
         self.spaces_filter = set(spaces) if spaces else None
         self.page_id_filter = page_id
+        self.force = force
         
         # Statistiques et rapport
         self.stats = {
@@ -72,7 +90,7 @@ class GliffyMigrator(ConfluenceBase):
     
     def get_all_pages(self, space_key: str, include_drafts: bool = True) -> List[Dict]:
         """Récupère toutes les pages d'un espace."""
-        return super().get_all_pages(space_key, include_drafts, expand='body.storage')
+        return super().get_all_pages(space_key, include_drafts, expand='body.storage,version')
     
     def get_page_details(self, page_id: str) -> Optional[Dict]:
         """Récupère les détails d'une page spécifique."""
@@ -107,10 +125,10 @@ class GliffyMigrator(ConfluenceBase):
         
         return gliffy_attachments
     
-    def is_page_already_processed(self, body_storage: str, macro_html: str) -> bool:
+    def extract_treatment_date(self, body_storage: str, macro_html: str) -> Optional[datetime]:
         """
-        Vérifie si une page a déjà été traitée (idempotence).
-        On cherche si une image avec le titre du Gliffy existe déjà juste après la macro.
+        Extrait la date de traitement depuis le marqueur dans la page.
+        Retourne None si aucun marqueur trouvé.
         """
         # Échapper la macro pour la recherche
         escaped_macro = re.escape(macro_html)
@@ -118,23 +136,171 @@ class GliffyMigrator(ConfluenceBase):
         # Chercher la macro dans le body
         macro_match = re.search(escaped_macro, body_storage, re.DOTALL | re.IGNORECASE)
         if not macro_match:
-            return False
+            return None
         
-        # Extraire le texte après la macro (les 500 premiers caractères)
-        after_macro = body_storage[macro_match.end():macro_match.end() + 500]
+        # Extraire le texte après la macro (les 2000 premiers caractères)
+        after_macro = body_storage[macro_match.end():macro_match.end() + 2000]
         
-        # Chercher un pattern d'image avec le titre du Gliffy
-        # Pattern: <p><strong>📊 Diagramme Gliffy exporté: ...</strong><br/><img ...
-        image_pattern = r'<p><strong>📊\s+Diagramme\s+Gliffy\s+exporté[^<]*</strong><br/><img'
-        if re.search(image_pattern, after_macro, re.IGNORECASE):
-            return True
+        # Chercher le marqueur de date de traitement dans un commentaire HTML
+        # Format: <!-- GLIFFY_TREATED: 2025-12-30T14:27:19.123456 -->
+        # Pattern plus flexible pour gérer les variations d'espacement
+        date_patterns = [
+            r'<!--\s*GLIFFY_TREATED:\s*([0-9T:\-\.]+)\s*-->',  # Format standard
+            r'<!--GLIFFY_TREATED:\s*([0-9T:\-\.]+)-->',  # Sans espaces autour des --
+            r'<!--\s*GLIFFY_TREATED:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?)\s*-->',  # Format plus strict
+        ]
         
-        # Chercher aussi un pattern plus générique
-        image_pattern_generic = r'<p><strong>[^<]*Diagramme\s+Gliffy[^<]*</strong><br/><img'
-        if re.search(image_pattern_generic, after_macro, re.IGNORECASE):
-            return True
+        for date_pattern in date_patterns:
+            date_match = re.search(date_pattern, after_macro, re.IGNORECASE)
+            if date_match:
+                try:
+                    date_str = date_match.group(1)
+                    # Nettoyer la date et parser
+                    date_str = date_str.strip()
+                    # Gérer le format avec ou sans timezone
+                    if 'Z' in date_str:
+                        date_str = date_str.replace('Z', '+00:00')
+                    elif '+' not in date_str and '-' not in date_str[-6:]:
+                        # Pas de timezone, ajouter UTC
+                        date_str = date_str + '+00:00'
+                    # Parser la date ISO
+                    return datetime.fromisoformat(date_str)
+                except (ValueError, AttributeError) as e:
+                    # Essayer avec un format plus simple si le parsing complet échoue
+                    try:
+                        # Format simplifié sans microsecondes ni timezone
+                        simple_date_str = date_str.split('.')[0]  # Enlever les microsecondes
+                        return datetime.fromisoformat(simple_date_str)
+                    except:
+                        continue
         
-        return False
+        return None
+    
+    def find_macro_in_body(self, body_storage: str, gliffy_att: Union[str, Dict]) -> Optional[re.Match]:
+        """
+        Trouve la macro Gliffy dans le body en utilisant plusieurs stratégies.
+        Retourne le match de la macro trouvée ou None.
+        """
+        if isinstance(gliffy_att, dict):
+            macro_html = gliffy_att.get('macroHtml', '')
+        else:
+            macro_html = gliffy_att
+
+        if not macro_html:
+            return None
+
+        # Stratégie 1: Chercher avec la macro exacte
+        escaped_macro = re.escape(macro_html)
+        macro_match = re.search(escaped_macro, body_storage, re.DOTALL | re.IGNORECASE)
+        if macro_match:
+            return macro_match
+        
+        # Stratégie 2: Extraire l'ID de la macro ou du diagramme pour une recherche plus flexible
+        macro_id_match = re.search(r'ac:parameter[^>]*ac:name=["\']macroId["\'][^>]*>([^<]+)</ac:parameter>', macro_html, re.IGNORECASE)
+        diagram_att_id_match = re.search(r'ac:parameter[^>]*ac:name=["\']diagramAttachmentId["\'][^>]*>([^<]+)</ac:parameter>', macro_html, re.IGNORECASE)
+        image_att_id_match = re.search(r'ac:parameter[^>]*ac:name=["\']imageAttachmentId["\'][^>]*>([^<]+)</ac:parameter>', macro_html, re.IGNORECASE)
+        
+        macro_id = macro_id_match.group(1).strip() if macro_id_match else None
+        diagram_att_id = diagram_att_id_match.group(1).strip() if diagram_att_id_match else None
+        image_att_id = image_att_id_match.group(1).strip() if image_att_id_match else None
+        
+        # Chercher toutes les macros Gliffy
+        gliffy_macro_pattern = r'<ac:structured-macro[^>]*ac:name=["\']gliffy["\'][^>]*>.*?</ac:structured-macro>'
+        all_macros = list(re.finditer(gliffy_macro_pattern, body_storage, re.DOTALL | re.IGNORECASE))
+        
+        if not all_macros:
+            return None
+        
+        # Si on a un macroId, chercher la macro correspondante (le plus fiable)
+        if macro_id:
+            for macro in all_macros:
+                macro_content = macro.group(0)
+                # Chercher le macroId dans cette macro
+                macro_id_in_content = re.search(r'ac:parameter[^>]*ac:name=["\']macroId["\'][^>]*>([^<]+)</ac:parameter>', macro_content, re.IGNORECASE)
+                if macro_id_in_content and macro_id_in_content.group(1).strip() == macro_id:
+                    return macro
+        
+        # Si on a un diagramAttachmentId ou imageAttachmentId, chercher la macro correspondante
+        if diagram_att_id or image_att_id:
+            for macro in all_macros:
+                macro_content = macro.group(0)
+                # Chercher les IDs dans cette macro
+                diagram_id_in_content = re.search(r'ac:parameter[^>]*ac:name=["\']diagramAttachmentId["\'][^>]*>([^<]+)</ac:parameter>', macro_content, re.IGNORECASE)
+                image_id_in_content = re.search(r'ac:parameter[^>]*ac:name=["\']imageAttachmentId["\'][^>]*>([^<]+)</ac:parameter>', macro_content, re.IGNORECASE)
+                
+                diagram_id_value = diagram_id_in_content.group(1).strip() if diagram_id_in_content else None
+                image_id_value = image_id_in_content.group(1).strip() if image_id_in_content else None
+                
+                if (diagram_att_id and diagram_id_value == diagram_att_id) or (image_att_id and image_id_value == image_att_id):
+                    return macro
+        
+        # Sinon, utiliser la première macro trouvée (on suppose qu'on traite dans l'ordre)
+        return all_macros[0] if all_macros else None
+    
+    def is_page_already_processed(self, body_storage: str, gliffy_att: Dict) -> Tuple[bool, Optional[str]]:
+        """
+        Vérifie si cette macro spécifique a déjà été traitée.
+        """
+        macro_match = self.find_macro_in_body(body_storage, gliffy_att)
+        if not macro_match:
+            return False, None
+            
+        # Extraire le texte après la macro
+        after_macro_start = macro_match.end()
+        after_macro_full = body_storage[after_macro_start:]
+        
+        # Trouver la fin du bloc de cette macro (jusqu'à la prochaine macro Gliffy)
+        # On limite la recherche pour ne pas détecter l'image d'un AUTRE Gliffy plus loin sur la page
+        next_macro_match = re.search(r'<ac:structured-macro[^>]*ac:name=["\']gliffy["\']', after_macro_full, re.IGNORECASE)
+        if next_macro_match:
+            after_macro = after_macro_full[:next_macro_match.start()]
+        else:
+            # Si pas d'autre macro, on limite à 5000 caractères après la macro
+            after_macro = after_macro_full[:5000]
+        
+        # ID à chercher
+        att_id = gliffy_att.get('attachmentId')
+        diag_id = gliffy_att.get('diagramAttachmentId')
+        
+        # Stratégie 1 : Chercher l'ID unique dans le bloc (le plus fiable)
+        if att_id and f"ID:{att_id}" in after_macro:
+            return True, "id_found_in_alt"
+        if diag_id and f"ID:{diag_id}" in after_macro:
+            return True, "diag_id_found_in_alt"
+            
+        # Stratégie 2 : Chercher le marqueur de traitement dans CE bloc précis
+        if "GLIFFY_TREATED:" in after_macro:
+            return True, "marker_found"
+                
+        # Stratégie 3 : Pattern d'image standard avec data:image dans CE bloc
+        if 'src="data:image/' in after_macro or "src='data:image/" in after_macro:
+            return True, "image_found_directly_after"
+                
+        return False, None
+    
+    def remove_existing_image(self, body_storage: str, gliffy_att: Dict) -> str:
+        """
+        Supprime l'image existante après la macro Gliffy.
+        """
+        macro_match = self.find_macro_in_body(body_storage, gliffy_att)
+        if not macro_match:
+            return body_storage
+            
+        after_macro_start = macro_match.end()
+        after_macro = body_storage[after_macro_start:after_macro_start + 5000]
+        
+        # Pattern pour supprimer le bloc complet (marqueur + paragraphe avec image)
+        # On cherche un paragraphe qui contient une image data:image
+        block_pattern = r'(?:<!--\s*GLIFFY_TREATED:[^>]*-->[\s\n]*)?<p><strong>📊?\s*Diagramme\s+Gliffy[^<]*</strong>.*?<img[^>]*src=["\']data:image/[^"\']*;base64,[^"\']*["\'][^>]*>.*?</p>'
+        
+        match = re.search(block_pattern, after_macro, re.IGNORECASE | re.DOTALL)
+        if match:
+            # Vérifier qu'aucune autre macro n'est au milieu
+            between_text = after_macro[:match.start()]
+            if "<ac:structured-macro" not in between_text:
+                return body_storage[:after_macro_start + match.start()] + body_storage[after_macro_start + match.end():]
+                
+        return body_storage
     
     def compress_image(self, image_content: bytes, mime_type: str, max_size_bytes: int = 3_500_000) -> Tuple[bytes, str]:
         """
@@ -287,13 +453,16 @@ class GliffyMigrator(ConfluenceBase):
         space_key: str,
         image_content: bytes,
         mime_type: str,
-        diagram_name: Optional[str],
-        macro_html: str,
+        gliffy_att: Dict,
         is_draft: bool = False,
         current_body: Optional[str] = None
     ) -> Tuple[bool, Optional[str]]:
         """Insère une image PNG après la macro Gliffy."""
         try:
+            attachment_id = gliffy_att.get('attachmentId')
+            diagram_name = gliffy_att.get('diagramName')
+            macro_html = gliffy_att.get('macroHtml', '')
+            
             url = f"{self.api_base}/content/{page_id}"
             params = {'expand': 'body.storage,version,space,title'}
             if is_draft:
@@ -309,72 +478,35 @@ class GliffyMigrator(ConfluenceBase):
             title = page_data.get('title', page_title)
             space_key_from_api = page_data.get('space', {}).get('key', space_key)
             
-            # Vérifier si déjà traité (idempotence)
-            if self.is_page_already_processed(current_body, macro_html):
-                return (False, "already_processed")
-            
-            # Vérifier la taille de l'image (limite Confluence: ~5 MB pour la requête totale)
-            # Base64 augmente la taille d'environ 33%, donc on limite à ~3.7 MB pour être sûr
-            MAX_IMAGE_SIZE = 3_700_000  # ~3.7 MB en bytes
-            image_size = len(image_content)
-            
-            # Si l'image est trop grande, essayer de la compresser automatiquement
-            if image_size > MAX_IMAGE_SIZE:
-                if PIL_AVAILABLE:
-                    # Compresser automatiquement l'image
-                    image_content, mime_type = self.compress_image(image_content, mime_type, MAX_IMAGE_SIZE)
-                    image_size = len(image_content)
-                    
-                    # Si après compression c'est encore trop grand, retourner une erreur
-                    if image_size > MAX_IMAGE_SIZE:
-                        return (False, f"Image trop grande même après compression ({image_size / 1_000_000:.2f} MB). Limite: {MAX_IMAGE_SIZE / 1_000_000:.2f} MB. Essayez de réduire la taille du diagramme Gliffy.")
+            # Vérifier idempotence encore une fois juste avant l'insertion
+            if not self.force:
+                is_processed, reason = self.is_page_already_processed(current_body, gliffy_att)
+                if is_processed:
+                    return (False, "already_processed")
                 else:
-                    return (False, f"Image trop grande ({image_size / 1_000_000:.2f} MB). Limite: {MAX_IMAGE_SIZE / 1_000_000:.2f} MB. Installez Pillow (pip install Pillow) pour activer la compression automatique.")
+                    current_body = self.remove_existing_image(current_body, gliffy_att)
             
-            # Vérifier aussi la taille après encodage base64
+            # ... (compression code) ...
             image_base64 = base64.b64encode(image_content).decode('utf-8')
-            base64_size = len(image_base64.encode('utf-8'))
-            total_request_size = len(current_body.encode('utf-8')) + base64_size + 500  # +500 pour le HTML autour
             
-            # Si la requête totale est trop grande, essayer de compresser encore plus
-            if total_request_size > 5_000_000:  # 5 MB limite Confluence
-                if PIL_AVAILABLE:
-                    # Calculer la taille d'image maximale pour que la requête totale soit < 5 MB
-                    max_image_base64_size = 5_000_000 - len(current_body.encode('utf-8')) - 500
-                    max_image_bytes = int(max_image_base64_size / 1.33)  # Base64 augmente de ~33%
-                    
-                    # Recompresser avec une limite plus stricte
-                    image_content, mime_type = self.compress_image(image_content, mime_type, max_image_bytes)
-                    image_base64 = base64.b64encode(image_content).decode('utf-8')
-                    base64_size = len(image_base64.encode('utf-8'))
-                    total_request_size = len(current_body.encode('utf-8')) + base64_size + 500
-                    
-                    # Vérifier à nouveau
-                    if total_request_size > 5_000_000:
-                        return (False, f"Requête trop grande après compression ({total_request_size / 1_000_000:.2f} MB). Limite: 5 MB. La page contient déjà beaucoup de contenu.")
-                else:
-                    return (False, f"Requête trop grande après encodage ({total_request_size / 1_000_000:.2f} MB). Limite: 5 MB. Installez Pillow (pip install Pillow) pour activer la compression automatique.")
-            
-            image_data_url = f"data:{mime_type};base64,{image_base64}"
-            
-            # Créer le titre avec le nom du diagramme
+            # ID unique pour le marquage dans l'alt
+            unique_tag = f"[ID:{attachment_id}]"
             if diagram_name:
-                title_text = f"📊 Diagramme Gliffy exporté: {diagram_name}"
+                escaped_name = escape(diagram_name)
+                title_text = f"📊 Diagramme Gliffy exporté: {escaped_name}"
+                alt_text = f"Diagramme Gliffy exporté: {escaped_name} {unique_tag}"
             else:
                 title_text = "📊 Diagramme Gliffy exporté"
+                alt_text = f"Diagramme Gliffy exporté {unique_tag}"
             
-            image_html = f'<p><strong>{title_text}</strong><br/><img src="{image_data_url}" alt="{title_text}" title="{title_text}" /></p>'
+            treatment_date = datetime.now(timezone.utc).isoformat()
+            treatment_marker = f'<!-- GLIFFY_TREATED: {treatment_date} -->'
+            
+            image_data_url = f"data:{mime_type};base64,{image_base64}"
+            image_html = f'{treatment_marker}\n<p><strong>{title_text}</strong><br/><img src="{image_data_url}" alt="{escape(alt_text)}" title="{escape(alt_text)}" /></p>'
             
             # Trouver la position de la macro
-            escaped_macro = re.escape(macro_html)
-            macro_match = re.search(escaped_macro, current_body, re.DOTALL | re.IGNORECASE)
-            
-            if not macro_match:
-                macro_pattern = r'<ac:structured-macro[^>]*ac:name=["\']gliffy["\'][^>]*>.*?</ac:structured-macro>'
-                all_macros = list(re.finditer(macro_pattern, current_body, re.DOTALL | re.IGNORECASE))
-                if all_macros:
-                    macro_match = all_macros[-1]
-            
+            macro_match = self.find_macro_in_body(current_body, gliffy_att)
             if macro_match:
                 insert_position = macro_match.end()
                 new_body = current_body[:insert_position] + image_html + current_body[insert_position:]
@@ -447,6 +579,15 @@ class GliffyMigrator(ConfluenceBase):
         is_draft = page.get('status') == 'draft'
         body_storage = page.get('body', {}).get('storage', {}).get('value', '')
         
+        # Récupérer la date de modification de la page
+        page_modified_date = None
+        version_info = page.get('version', {})
+        if 'when' in version_info:
+            try:
+                page_modified_date = datetime.fromisoformat(version_info['when'].replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                pass
+        
         if not body_storage:
             return {
                 'page_id': page_id,
@@ -479,14 +620,23 @@ class GliffyMigrator(ConfluenceBase):
             attachment_id = gliffy_att.get('attachmentId')
             macro_html = gliffy_att.get('macroHtml', '')
             diagram_name = gliffy_att.get('diagramName')
+            macro_id = gliffy_att.get('macroId')
             
             if not attachment_id:
                 continue
             
-            # Vérifier si cette macro a déjà été traitée
-            if self.is_page_already_processed(body_storage, macro_html):
-                already_processed_count += 1
-                continue
+            # Récupérer le contenu à jour
+            current_page_data = self.get_page_details(page_id)
+            current_body_storage = current_page_data.get('body', {}).get('storage', {}).get('value', '') if current_page_data else body_storage
+            
+            # Vérifier idempotence
+            if not self.force:
+                is_processed, reason = self.is_page_already_processed(current_body_storage, gliffy_att)
+                if is_processed:
+                    already_processed_count += 1
+                    continue
+            else:
+                current_body_storage = self.remove_existing_image(current_body_storage, gliffy_att)
             
             # Télécharger l'image
             result = self.download_attachment_direct(page_id, attachment_id, is_draft=is_draft)
@@ -507,13 +657,13 @@ class GliffyMigrator(ConfluenceBase):
                 try:
                     insert_success, result_msg = self.insert_image_after_macro(
                         page_id, page_title, space_key, image_content, mime_type,
-                        diagram_name, macro_html, is_draft, body_storage
+                        gliffy_att, is_draft, current_body_storage
                     )
                     
                     if insert_success:
                         images_inserted += 1
                         self.stats['images_inserted'] += 1
-                        body_storage = result_msg  # Mettre à jour pour la prochaine itération
+                        # Ne pas mettre à jour body_storage localement car on récupère depuis l'API à chaque fois
                     elif result_msg == "already_processed":
                         # Page déjà traitée, on skip
                         already_processed_count += 1

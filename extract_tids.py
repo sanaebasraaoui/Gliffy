@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
 Script pour extraire tous les TID (Type ID) uniques depuis les fichiers Gliffy.
+
+Ce module analyse les fichiers Gliffy pour extraire tous les Type IDs (TID) uniques
+utilisés dans les diagrammes, permettant de créer un mapping TID -> images.
+
+Fonctionnalités :
+- Extraction des TID depuis les fichiers Gliffy
+- Comptage des occurrences de chaque TID
+- Génération d'un mapping avec statistiques
+- Export en format JSON et texte
+
+Auteur: Sanae Basraoui
 """
 
 import json

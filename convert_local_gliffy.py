@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
 Script pour convertir les fichiers .gliffy locaux en Excalidraw.
+
+Ce module permet de convertir des fichiers Gliffy stockés localement
+en fichiers Excalidraw, sans nécessiter de connexion à Confluence.
+
+Fonctionnalités :
+- Conversion de fichiers .gliffy locaux
+- Traitement par lot (dossier entier)
+- Support du mapper TID pour les images
+- Sauvegarde des fichiers .excalidraw convertis
+
+Auteur: Sanae Basraoui
 """
 
 import json

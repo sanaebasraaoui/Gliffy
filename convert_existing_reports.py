@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
 Script pour convertir les fichiers JSON existants en format texte lisible.
+
+Ce module permet de convertir des rapports JSON existants (inventaires, migrations)
+en format texte lisible pour faciliter la consultation.
+
+Fonctionnalités :
+- Conversion des rapports JSON en format TXT
+- Support des rapports de migration et d'inventaire
+- Génération de rapports avec horodatage
+- Formatage lisible pour les humains
+
+Auteur: Sanae Basraoui
 """
 
 import json

@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
 Classe de base pour les opérations Confluence communes.
+
+Ce module fournit une classe de base qui encapsule les opérations communes
+pour interagir avec l'API REST de Confluence (Cloud et Server/Data Center).
+
+Fonctionnalités :
+- Détection automatique du type de Confluence (Cloud vs Server/Data Center)
+- Gestion de l'authentification via API token
+- Récupération des espaces et pages
+- Support des drafts (brouillons)
+
+Auteur: Sanae Basraoui
 """
 
 import requests
@@ -16,25 +27,44 @@ class ConfluenceBase:
         self.username = username
         self.api_token = api_token
         
-        # Détecter si c'est Atlassian Cloud
+        # Détecter si c'est Atlassian Cloud ou Confluence Server/Data Center
+        # Pour Cloud (atlassian.net), l'API est toujours à /wiki/rest/api
+        # Pour Server/Data Center, l'API est à /rest/api
         if 'atlassian.net' in self.confluence_url.lower():
+            # Atlassian Cloud
             if '/wiki' in self.confluence_url.lower():
-                self.api_base = f"{self.confluence_url}/rest/api"
+                # URL contient déjà /wiki, utiliser /wiki/rest/api
+                self.api_base = f"{self.confluence_url.rstrip('/wiki')}/wiki/rest/api"
             else:
+                # URL sans /wiki, ajouter /wiki/rest/api
                 self.api_base = f"{self.confluence_url}/wiki/rest/api"
         else:
+            # Confluence Server/Data Center - API à /rest/api
             self.api_base = f"{self.confluence_url}/rest/api"
         
-        # Session HTTP
+        # Session HTTP avec validation SSL explicite
         self.session = requests.Session()
         self.session.auth = (username, api_token)
+        self.session.verify = True  # Validation SSL explicite (par défaut mais explicite pour sécurité)
         self.session.headers.update({
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         })
     
     def get_all_spaces(self, spaces_filter: Optional[List[str]] = None) -> List[Dict]:
-        """Récupère tous les espaces Confluence."""
+        """
+        Récupère tous les espaces Confluence.
+        
+        Cette méthode interroge l'API REST de Confluence pour obtenir la liste
+        de tous les espaces accessibles. La pagination est gérée automatiquement.
+        
+        Args:
+            spaces_filter: Liste optionnelle de clés d'espaces à filtrer.
+                          Si None, retourne tous les espaces.
+        
+        Returns:
+            List[Dict]: Liste des espaces avec leurs métadonnées (key, name, etc.)
+        """
         spaces = []
         start = 0
         limit = 100
@@ -70,7 +100,21 @@ class ConfluenceBase:
         return spaces
     
     def get_all_pages(self, space_key: str, include_drafts: bool = True, expand: str = 'body.storage') -> List[Dict]:
-        """Récupère toutes les pages d'un espace."""
+        """
+        Récupère toutes les pages d'un espace.
+        
+        Cette méthode récupère toutes les pages publiées d'un espace Confluence,
+        avec option d'inclure les brouillons (drafts). La pagination est gérée
+        automatiquement.
+        
+        Args:
+            space_key: Clé de l'espace Confluence (ex: 'DEV', 'PROD')
+            include_drafts: Si True, inclut aussi les pages en brouillon
+            expand: Champs à étendre dans la réponse API (ex: 'body.storage,version')
+        
+        Returns:
+            List[Dict]: Liste des pages avec leurs métadonnées complètes
+        """
         pages = []
         start = 0
         limit = 100
@@ -144,7 +188,21 @@ class ConfluenceBase:
         return pages
     
     def get_page_details(self, page_id: str, expand: str = 'body.storage,space,version') -> Optional[Dict]:
-        """Récupère les détails d'une page spécifique."""
+        """
+        Récupère les détails d'une page spécifique.
+        
+        Cette méthode récupère les informations complètes d'une page Confluence
+        par son ID, incluant le contenu, les métadonnées et les informations
+        d'espace et de version.
+        
+        Args:
+            page_id: ID de la page Confluence
+            expand: Champs à étendre dans la réponse API
+        
+        Returns:
+            Optional[Dict]: Dictionnaire contenant les détails de la page,
+                           ou None si la page n'existe pas ou n'est pas accessible
+        """
         url = f"{self.api_base}/content/{page_id}"
         params = {'expand': expand}
         

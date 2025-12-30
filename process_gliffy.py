@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Script unique pour traiter tous les Gliffy depuis Confluence :
-1. Trouve toutes les pages avec Gliffy
-2. Télécharge les images PNG (capture d'écran)
-3. Insère les images en bas du Gliffy dans Confluence
-4. Convertit en Excalidraw avec images en base64
-5. Sauvegarde dans output/
+Script unique pour traiter tous les Gliffy depuis Confluence.
+
+Ce module effectue un traitement complet des diagrammes Gliffy dans Confluence :
+1. Trouve toutes les pages contenant des Gliffy
+2. Télécharge les images PNG (captures d'écran) depuis les attachments
+3. Insère les images en bas du Gliffy dans les pages Confluence
+4. Convertit les Gliffy en Excalidraw avec images en base64
+5. Sauvegarde les fichiers Excalidraw dans le dossier output/
+
+Auteur: Sanae Basraoui
 """
 
 import argparse

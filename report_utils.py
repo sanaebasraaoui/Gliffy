@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 """
 Module utilitaire pour générer des rapports en format texte lisible.
-Tous les rapports sont sauvegardés dans le dossier 'reports/'.
+
+Ce module fournit des fonctions pour exporter différents types de rapports
+en format texte lisible avec horodatage automatique.
+
+Types de rapports supportés :
+- Inventaire Confluence (pages, espaces, métadonnées)
+- Rapports de migration Gliffy
+- Liste des pages contenant des Gliffy
+- Mapping des TID Gliffy
+
+Tous les rapports sont sauvegardés dans le dossier 'reports/' avec horodatage.
+
+Auteur: Sanae Basraoui
 """
 
 from pathlib import Path
@@ -222,9 +234,27 @@ def export_inventory_txt(inventory: List[Dict], output_file: str = "confluence_i
                 f.write(f"    Version: {page.get('version', 'N/A')}\n")
                 f.write(f"    URL: {page.get('url', 'N/A')}\n")
                 f.write(f"    Créé le: {page.get('created_date', 'N/A')} par {page.get('created_by', 'N/A')}\n")
-                f.write(f"    Modifié le: {page.get('last_updated_date', 'N/A')} par {page.get('last_updated_by', 'N/A')}\n")
+                last_updated_date = page.get('last_updated_date', '')
+                last_updated_by = page.get('last_updated_by', '')
+                if last_updated_date and last_updated_by:
+                    f.write(f"    Modifié le: {last_updated_date} par {last_updated_by}\n")
+                elif last_updated_date:
+                    f.write(f"    Modifié le: {last_updated_date}\n")
+                else:
+                    f.write(f"    Modifié le: Jamais modifiée\n")
                 if page.get('parent_title'):
                     f.write(f"    Page parent: {page.get('parent_title')} (ID: {page.get('parent_id', 'N/A')})\n")
+                
+                # Informations Gliffy
+                gliffy_count = page.get('gliffy_count', 0)
+                gliffy_titles = page.get('gliffy_titles', [])
+                if gliffy_count > 0:
+                    f.write(f"    Gliffy : {gliffy_count}\n")
+                    for title in gliffy_titles:
+                        f.write(f"    - {title}\n")
+                else:
+                    f.write(f"    Gliffy : Aucun\n")
+                
                 f.write("\n")
             
             f.write("\n")

@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
 Gestionnaire de mapping TID -> images pour les icônes Gliffy.
+
+Ce module gère le mapping entre les Type IDs (TID) utilisés dans les fichiers
+Gliffy et les images correspondantes (icônes, formes, etc.).
+
+Fonctionnalités :
+- Chargement du mapping TID depuis un fichier JSON
+- Conversion des TID en images base64
+- Gestion du cache des images
+- Support des images manquantes avec fallback
+
+Auteur: Sanae Basraoui
 """
 
 import json

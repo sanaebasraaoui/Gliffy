@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
 Script pour télécharger les diagrammes Gliffy depuis Confluence et les insérer dans les pages.
+
+Ce module permet de télécharger les images Gliffy (attachments) depuis Confluence
+et de les insérer directement dans les pages sous les diagrammes correspondants.
+
+Fonctionnalités :
+- Téléchargement des attachments Gliffy (PNG/SVG)
+- Insertion des images dans les pages Confluence
+- Conversion en Excalidraw avec images en base64
+- Sauvegarde locale des images téléchargées
+
+Auteur: Sanae Basraoui
 """
 
 import argparse

@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-Module de conversion Gliffy vers Excalidraw, inspiré du script PowerShell convert-gliffy.ps1
+Module de conversion Gliffy vers Excalidraw.
+
+Ce module convertit les fichiers Gliffy (.gliffy) au format Excalidraw (.excalidraw).
+Il gère la conversion des éléments graphiques, des styles, des textes et des images.
+
+Fonctionnalités :
+- Conversion des formes et éléments graphiques Gliffy vers Excalidraw
+- Préservation des styles (couleurs, bordures, remplissages)
+- Gestion des textes et polices
+- Support du mapper TID pour les images d'icônes
+- Conversion des coordonnées et transformations
+
+Inspiré du script PowerShell convert-gliffy.ps1.
+
+Auteur: Sanae Basraoui
 """
 
 import json
