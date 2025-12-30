@@ -420,7 +420,7 @@ def convert_gliffy_to_excalidraw(gliffy_data: Dict, tid_image_mapper=None) -> Di
         try:
             from tid_image_mapper import TIDImageMapper
             tid_image_mapper = TIDImageMapper()
-        except ImportError:
+        except (ImportError, Exception):
             tid_image_mapper = None
     
     elements = []

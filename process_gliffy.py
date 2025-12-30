@@ -502,7 +502,7 @@ class GliffyProcessor:
                             try:
                                 from tid_image_mapper import TIDImageMapper
                                 tid_mapper = TIDImageMapper()
-                            except ImportError:
+                            except (ImportError, Exception):
                                 tid_mapper = None
                             
                             excalidraw_data = convert_gliffy_to_excalidraw(gliffy_json, tid_image_mapper=tid_mapper)

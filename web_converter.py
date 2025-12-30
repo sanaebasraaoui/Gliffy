@@ -605,7 +605,8 @@ def convert():
         try:
             from tid_image_mapper import TIDImageMapper
             tid_mapper = TIDImageMapper()
-        except ImportError:
+        except Exception as e:
+            logger.warning(f"Impossible d'initialiser le mapper TID: {type(e).__name__} - {str(e)}")
             tid_mapper = None
         
         converted_files = []
@@ -675,8 +676,10 @@ def convert():
     
     except Exception as e:
         # Gestion d'erreur globale sécurisée
-        logger.error(f"Erreur inattendue dans convert: {type(e).__name__}")
-        return jsonify({'error': 'Une erreur interne est survenue'}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Erreur inattendue dans convert: {type(e).__name__} - {str(e)}\n{error_details}")
+        return jsonify({'error': f'Une erreur interne est survenue: {type(e).__name__}'}), 500
 
 
 # Gestionnaire d'erreurs global pour l'API pour éviter les réponses HTML

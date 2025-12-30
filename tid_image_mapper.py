@@ -25,7 +25,12 @@ class TIDImageMapper:
     def __init__(self, mapping_file: str = 'tids_mapping.json', images_dir: str = 'tid_images'):
         self.mapping_file = Path(mapping_file)
         self.images_dir = Path(images_dir)
-        self.images_dir.mkdir(exist_ok=True)
+        try:
+            self.images_dir.mkdir(exist_ok=True)
+        except PermissionError:
+            # En cas de manque de permission, on continue sans créer le dossier
+            # Les opérations de lecture/écriture ultérieures échoueront gracieusement
+            pass
         self.mapping = self._load_mapping()
     
     def _load_mapping(self) -> Dict:
