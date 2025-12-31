@@ -98,8 +98,12 @@ class GliffyDownloader:
         
         return gliffy_attachments
 
-    def download_attachment_direct(self, page_id: str, attachment_id: str, is_draft: bool = False) -> Optional[Tuple[bytes, str]]:
-        """Télécharge un attachment directement via l'API REST."""
+    def download_attachment_direct(self, page_id: str, attachment_id: str, is_draft: bool = False) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+        """
+        Télécharge un attachment directement via l'API REST.
+        Retourne (content, mime_type, error_msg)
+        """
+        last_error = None
         try:
             download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id}/download"
             params = {}
@@ -113,15 +117,20 @@ class GliffyDownloader:
                 content = download_response.content
                 if b'Error 404' not in content and b'Diagram Missing' not in content:
                     content_type = download_response.headers.get('content-type', '').lower()
+                    mime_type = 'application/octet-stream'
                     if 'svg' in content_type or content.startswith(b'<svg'):
-                        return (content, 'image/svg+xml')
+                        mime_type = 'image/svg+xml'
                     elif 'png' in content_type or content.startswith(b'\x89PNG'):
-                        return (content, 'image/png')
+                        mime_type = 'image/png'
                     elif 'image/' in content_type:
-                        return (content, content_type)
-                    return (content, content_type or 'application/octet-stream')
+                        mime_type = content_type
+                    return (content, mime_type, None)
+                else:
+                    last_error = f"Contenu invalide (404/Missing) pour {attachment_id}"
+            else:
+                last_error = f"HTTP {download_response.status_code}"
             
-            if download_response.status_code != 200 and attachment_id.startswith('att'):
+            if attachment_id.startswith('att'):
                 attachment_id_no_prefix = attachment_id[3:]
                 download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id_no_prefix}/download"
                 download_response = self.session.get(download_api_url, params=params, headers=headers, timeout=30)
@@ -130,17 +139,23 @@ class GliffyDownloader:
                     content = download_response.content
                     if b'Error 404' not in content and b'Diagram Missing' not in content:
                         content_type = download_response.headers.get('content-type', '').lower()
+                        mime_type = 'application/octet-stream'
                         if 'svg' in content_type or content.startswith(b'<svg'):
-                            return (content, 'image/svg+xml')
+                            mime_type = 'image/svg+xml'
                         elif 'png' in content_type or content.startswith(b'\x89PNG'):
-                            return (content, 'image/png')
+                            mime_type = 'image/png'
                         elif 'image/' in content_type:
-                            return (content, content_type)
-                        return (content, content_type or 'application/octet-stream')
+                            mime_type = content_type
+                        return (content, mime_type, None)
+                    else:
+                        last_error = f"Contenu invalide (404/Missing) pour {attachment_id_no_prefix}"
+                else:
+                    last_error = f"HTTP {download_response.status_code} (avec et sans préfixe 'att')"
+            
+            return (None, None, last_error or "Échec")
+            
         except Exception as e:
-            pass
-        
-        return None
+            return (None, None, f"Exception: {str(e)}")
 
     def download_gliffy_json(self, page_id: str, diagram_attachment_id: str, is_draft: bool = False) -> Optional[dict]:
         """Télécharge le fichier .gliffy JSON."""

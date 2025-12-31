@@ -132,6 +132,10 @@ class GliffyMigrator(ConfluenceBase):
             
             # On ajoute à la liste si on a trouvé AU MOINS une info permettant d'identifier le Gliffy
             if att_id or diagram_att_id_value or diagram_name or macro_id_value:
+                # Debug : logger les IDs suspects
+                if att_id == 'test' or diagram_att_id_value == 'test':
+                    print(f"  ⚠️  Macro Gliffy avec ID suspect 'test' trouvée sur la page")
+
                 gliffy_attachments.append({
                     'attachmentId': att_id,
                     'diagramAttachmentId': diagram_att_id_value or att_id,
@@ -415,8 +419,12 @@ class GliffyMigrator(ConfluenceBase):
             # En cas d'erreur, retourner l'image originale
             return (image_content, mime_type)
     
-    def download_attachment_direct(self, page_id: str, attachment_id: str, is_draft: bool = False) -> Optional[Tuple[bytes, str]]:
-        """Télécharge un attachment directement via l'API REST."""
+    def download_attachment_direct(self, page_id: str, attachment_id: str, is_draft: bool = False) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+        """
+        Télécharge un attachment directement via l'API REST.
+        Retourne (content, mime_type, error_msg)
+        """
+        last_error = None
         try:
             download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id}/download"
             params = {}
@@ -429,16 +437,21 @@ class GliffyMigrator(ConfluenceBase):
                 content = download_response.content
                 if b'Error 404' not in content and b'Diagram Missing' not in content:
                     content_type = download_response.headers.get('content-type', '').lower()
+                    mime_type = 'application/octet-stream'
                     if 'svg' in content_type or content.startswith(b'<svg'):
-                        return (content, 'image/svg+xml')
+                        mime_type = 'image/svg+xml'
                     elif 'png' in content_type or content.startswith(b'\x89PNG'):
-                        return (content, 'image/png')
+                        mime_type = 'image/png'
                     elif 'image/' in content_type:
-                        return (content, content_type)
-                    return (content, content_type or 'application/octet-stream')
+                        mime_type = content_type
+                    return (content, mime_type, None)
+                else:
+                    last_error = f"Contenu invalide (404/Missing) pour l'attachment {attachment_id}"
+            else:
+                last_error = f"HTTP {download_response.status_code}"
             
             # Essayer sans le préfixe 'att'
-            if download_response.status_code != 200 and attachment_id.startswith('att'):
+            if attachment_id.startswith('att'):
                 attachment_id_no_prefix = attachment_id[3:]
                 download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id_no_prefix}/download"
                 download_response = self.session.get(download_api_url, params=params, timeout=30)
@@ -447,21 +460,27 @@ class GliffyMigrator(ConfluenceBase):
                     content = download_response.content
                     if b'Error 404' not in content and b'Diagram Missing' not in content:
                         content_type = download_response.headers.get('content-type', '').lower()
+                        mime_type = 'application/octet-stream'
                         if 'svg' in content_type or content.startswith(b'<svg'):
-                            return (content, 'image/svg+xml')
+                            mime_type = 'image/svg+xml'
                         elif 'png' in content_type or content.startswith(b'\x89PNG'):
-                            return (content, 'image/png')
+                            mime_type = 'image/png'
                         elif 'image/' in content_type:
-                            return (content, content_type)
-                        return (content, content_type or 'application/octet-stream')
+                            mime_type = content_type
+                        return (content, mime_type, None)
+                    else:
+                        last_error = f"Contenu invalide (404/Missing) pour l'attachment {attachment_id_no_prefix}"
+                else:
+                    last_error = f"HTTP {download_response.status_code} (avec et sans préfixe 'att')"
+            
+            return (None, None, last_error or "Échec du téléchargement")
+            
         except requests.exceptions.Timeout:
-            return None
+            return (None, None, "Timeout (30s)")
         except requests.exceptions.RequestException as e:
-            # Ne pas logger ici pour éviter trop de bruit, mais on pourrait améliorer
-            return None
+            return (None, None, f"Erreur réseau: {str(e)}")
         except Exception as e:
-            # Autres exceptions inattendues
-            return None
+            return (None, None, f"Exception: {str(e)}")
     
     def insert_image_after_macro(
         self,
@@ -656,20 +675,19 @@ class GliffyMigrator(ConfluenceBase):
                 current_body_storage = self.remove_existing_image(current_body_storage, gliffy_att)
             
             # Télécharger l'image
-            result = self.download_attachment_direct(page_id, attachment_id, is_draft=is_draft)
+            image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id, is_draft=is_draft)
             
-            if not result and is_draft:
-                result = self.download_attachment_direct(page_id, attachment_id, True)
+            if not image_content and is_draft:
+                # Réessayer en forçant le status draft si pas déjà fait
+                image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id, True)
             
-            if not result and attachment_id.startswith('att'):
+            if not image_content and attachment_id.startswith('att'):
                 attachment_id_no_prefix = attachment_id[3:]
-                result = self.download_attachment_direct(page_id, attachment_id_no_prefix, is_draft=is_draft)
-                if not result and is_draft:
-                    result = self.download_attachment_direct(page_id, attachment_id_no_prefix, True)
+                image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id_no_prefix, is_draft=is_draft)
+                if not image_content and is_draft:
+                    image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id_no_prefix, True)
             
-            if result:
-                image_content, mime_type = result
-                
+            if image_content:
                 # Insérer l'image
                 try:
                     insert_success, result_msg = self.insert_image_after_macro(
@@ -691,7 +709,7 @@ class GliffyMigrator(ConfluenceBase):
                     error_msg = f"Exception lors de l'insertion: {str(e)}"
                     errors.append(f"Gliffy {idx + 1}: {error_msg}")
             else:
-                errors.append(f"Gliffy {idx + 1}: Impossible de télécharger l'image (attachment_id: {attachment_id})")
+                errors.append(f"Gliffy {idx + 1}: Impossible de télécharger l'image (attachment_id: {attachment_id}) - {download_error}")
         
         if images_inserted > 0:
             self.stats['pages_modified'] += 1

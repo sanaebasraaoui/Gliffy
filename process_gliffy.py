@@ -214,8 +214,12 @@ class GliffyProcessor:
         
         return gliffy_attachments
 
-    def download_attachment_direct(self, page_id: str, attachment_id: str, is_draft: bool = False) -> Optional[Tuple[bytes, str]]:
-        """Télécharge un attachment directement via l'API REST."""
+    def download_attachment_direct(self, page_id: str, attachment_id: str, is_draft: bool = False) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+        """
+        Télécharge un attachment directement via l'API REST.
+        Retourne (content, mime_type, error_msg)
+        """
+        last_error = None
         try:
             download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id}/download"
             params = {}
@@ -228,15 +232,20 @@ class GliffyProcessor:
                 content = download_response.content
                 if b'Error 404' not in content and b'Diagram Missing' not in content:
                     content_type = download_response.headers.get('content-type', '').lower()
+                    mime_type = 'application/octet-stream'
                     if 'svg' in content_type or content.startswith(b'<svg'):
-                        return (content, 'image/svg+xml')
+                        mime_type = 'image/svg+xml'
                     elif 'png' in content_type or content.startswith(b'\x89PNG'):
-                        return (content, 'image/png')
+                        mime_type = 'image/png'
                     elif 'image/' in content_type:
-                        return (content, content_type)
-                    return (content, content_type or 'application/octet-stream')
+                        mime_type = content_type
+                    return (content, mime_type, None)
+                else:
+                    last_error = f"Contenu invalide (404/Missing) pour {attachment_id}"
+            else:
+                last_error = f"HTTP {download_response.status_code}"
             
-            if download_response.status_code != 200 and attachment_id.startswith('att'):
+            if attachment_id.startswith('att'):
                 attachment_id_no_prefix = attachment_id[3:]
                 download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id_no_prefix}/download"
                 download_response = self.session.get(download_api_url, params=params, headers={}, timeout=30)
@@ -245,17 +254,23 @@ class GliffyProcessor:
                     content = download_response.content
                     if b'Error 404' not in content and b'Diagram Missing' not in content:
                         content_type = download_response.headers.get('content-type', '').lower()
+                        mime_type = 'application/octet-stream'
                         if 'svg' in content_type or content.startswith(b'<svg'):
-                            return (content, 'image/svg+xml')
+                            mime_type = 'image/svg+xml'
                         elif 'png' in content_type or content.startswith(b'\x89PNG'):
-                            return (content, 'image/png')
+                            mime_type = 'image/png'
                         elif 'image/' in content_type:
-                            return (content, content_type)
-                        return (content, content_type or 'application/octet-stream')
-        except Exception:
-            pass
-        
-        return None
+                            mime_type = content_type
+                        return (content, mime_type, None)
+                    else:
+                        last_error = f"Contenu invalide (404/Missing) pour {attachment_id_no_prefix}"
+                else:
+                    last_error = f"HTTP {download_response.status_code} (avec et sans préfixe 'att')"
+            
+            return (None, None, last_error or "Échec")
+            
+        except Exception as e:
+            return (None, None, f"Exception: {str(e)}")
 
     def download_gliffy_json(self, page_id: str, diagram_attachment_id: str, is_draft: bool = False) -> Optional[dict]:
         """Télécharge le fichier .gliffy JSON."""
@@ -427,26 +442,32 @@ class GliffyProcessor:
                         container_id = container_match.group(1).strip()
                 
                 if container_id and container_id != page_id:
-                    result = self.download_attachment_direct(container_id, attachment_id, False)
-                    if not result:
-                        result = self.download_attachment_direct(container_id, attachment_id, True)
-                    if not result and attachment_id.startswith('att'):
+                    image_content, mime_type, download_error = self.download_attachment_direct(container_id, attachment_id, False)
+                    if not image_content:
+                        image_content, mime_type, download_error = self.download_attachment_direct(container_id, attachment_id, True)
+                    
+                    if not image_content and attachment_id.startswith('att'):
                         attachment_id_no_prefix = attachment_id[3:]
-                        result = self.download_attachment_direct(container_id, attachment_id_no_prefix, False)
-                        if not result:
-                            result = self.download_attachment_direct(container_id, attachment_id_no_prefix, True)
+                        image_content, mime_type, download_error = self.download_attachment_direct(container_id, attachment_id_no_prefix, False)
+                        if not image_content:
+                            image_content, mime_type, download_error = self.download_attachment_direct(container_id, attachment_id_no_prefix, True)
+                    
+                    if image_content:
+                        result = (image_content, mime_type)
                 
                 if not result:
-                    result = self.download_attachment_direct(page_id, attachment_id, is_draft=is_draft)
-                
-                if not result and is_draft:
-                    result = self.download_attachment_direct(page_id, attachment_id, True)
-                
-                if not result and attachment_id.startswith('att'):
-                    attachment_id_no_prefix = attachment_id[3:]
-                    result = self.download_attachment_direct(page_id, attachment_id_no_prefix, is_draft=is_draft)
-                    if not result and is_draft:
-                        result = self.download_attachment_direct(page_id, attachment_id_no_prefix, True)
+                    image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id, is_draft=is_draft)
+                    if not image_content and is_draft:
+                        image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id, True)
+                    
+                    if not image_content and attachment_id.startswith('att'):
+                        attachment_id_no_prefix = attachment_id[3:]
+                        image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id_no_prefix, is_draft=is_draft)
+                        if not image_content and is_draft:
+                            image_content, mime_type, download_error = self.download_attachment_direct(page_id, attachment_id_no_prefix, True)
+                    
+                    if image_content:
+                        result = (image_content, mime_type)
             
             if result:
                 image_content, mime_type = result
