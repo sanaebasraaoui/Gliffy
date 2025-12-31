@@ -28,28 +28,42 @@ class ConfluenceBase:
         self.api_token = api_token
         
         # Détecter si c'est Atlassian Cloud ou Confluence Server/Data Center
-        # Pour Cloud (atlassian.net), l'API est toujours à /wiki/rest/api
-        # Pour Server/Data Center, l'API est à /rest/api
-        if 'atlassian.net' in self.confluence_url.lower():
+        is_cloud = 'atlassian.net' in self.confluence_url.lower()
+        
+        if is_cloud:
             # Atlassian Cloud
             if '/wiki' in self.confluence_url.lower():
-                # URL contient déjà /wiki, utiliser /wiki/rest/api
                 self.api_base = f"{self.confluence_url.rstrip('/wiki')}/wiki/rest/api"
             else:
-                # URL sans /wiki, ajouter /wiki/rest/api
                 self.api_base = f"{self.confluence_url}/wiki/rest/api"
         else:
-            # Confluence Server/Data Center - API à /rest/api
+            # Confluence Server/Data Center
             self.api_base = f"{self.confluence_url}/rest/api"
         
-        # Session HTTP avec validation SSL explicite
+        # Session HTTP avec validation SSL
         self.session = requests.Session()
-        self.session.auth = (username, api_token)
-        self.session.verify = True  # Validation SSL explicite (par défaut mais explicite pour sécurité)
+        
+        # Configuration de l'authentification
+        if is_cloud:
+            # Cloud utilise Basic Auth (Email + API Token)
+            self.session.auth = (username, api_token)
+            auth_type = "Basic (Cloud)"
+        else:
+            # Data Center utilise souvent Bearer Auth pour les PAT (Personal Access Tokens)
+            # On n'utilise pas self.session.auth pour Bearer, on l'ajoute aux headers
+            self.session.headers.update({
+                'Authorization': f'Bearer {api_token}'
+            })
+            auth_type = "Bearer (Data Center PAT)"
+            
+        self.session.verify = True
         self.session.headers.update({
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         })
+        
+        # Log discret de la méthode d'auth utilisée
+        # print(f"ℹ️ Authentification: {auth_type}")
     
     def get_all_spaces(self, spaces_filter: Optional[List[str]] = None) -> List[Dict]:
         """
