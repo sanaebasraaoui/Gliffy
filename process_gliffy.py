@@ -426,7 +426,7 @@ class GliffyProcessor:
         
         self.stats['pages_analyzed'] += 1
         
-        gliffy_attachments = self.extract_gliffy_attachments_from_content(body_storage)
+        gliffy_attachments = self.extract_gliffy_attachments_from_content(body_storage, page_id)
         
         if not gliffy_attachments:
             return
