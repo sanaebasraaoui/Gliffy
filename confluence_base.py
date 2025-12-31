@@ -89,6 +89,15 @@ class ConfluenceBase:
                 
                 start += limit
             except requests.exceptions.RequestException as e:
+                print(f"❌ Erreur lors de la récupération des espaces: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"   Code HTTP: {e.response.status_code}")
+                    try:
+                        error_data = e.response.json()
+                        error_msg = error_data.get('message') or error_data.get('errorMessage') or str(error_data)
+                        print(f"   Détails: {error_msg}")
+                    except:
+                        print(f"   Réponse: {e.response.text[:200]}")
                 break
         
         # Filtrer si des espaces spécifiques sont demandés
@@ -144,7 +153,10 @@ class ConfluenceBase:
                     break
                 
                 start += limit
-            except requests.exceptions.RequestException:
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Erreur lors de la récupération des pages: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"   Code HTTP: {e.response.status_code}")
                 break
         
         # Chercher aussi les drafts si demandé
@@ -208,10 +220,13 @@ class ConfluenceBase:
         
         try:
             response = self.session.get(url, params=params)
+            response.raise_for_status()
             if response.status_code == 200:
                 return response.json()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération de la page {page_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"   Code HTTP: {e.response.status_code}")
         
         return None
 
