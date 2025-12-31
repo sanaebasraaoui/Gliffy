@@ -110,7 +110,9 @@ class GliffyDownloader:
             if is_draft:
                 params['status'] = 'draft'
             
-            headers = {}
+            # Utiliser un header Accept large pour le téléchargement binaire
+            # et outrepasser le Accept: application/json de la session
+            headers = {'Accept': '*/*'}
             download_response = self.session.get(download_api_url, params=params, headers=headers, timeout=30)
             
             if download_response.status_code == 200:

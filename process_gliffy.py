@@ -185,7 +185,7 @@ class GliffyProcessor:
         
         return pages
 
-    def extract_gliffy_attachments_from_content(self, body_storage: str) -> List[Dict]:
+    def extract_gliffy_attachments_from_content(self, body_storage: str, page_id: str = "Inconnue") -> List[Dict]:
         """Extrait les IDs d'attachments Gliffy depuis le contenu d'une page."""
         gliffy_attachments = []
         
@@ -197,12 +197,29 @@ class GliffyProcessor:
             diagram_att_id = re.search(r'<ac:parameter[^>]*ac:name=["\']diagramAttachmentId["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
             macro_id = re.search(r'<ac:parameter[^>]*ac:name=["\']macroId["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
             name_param = re.search(r'<ac:parameter[^>]*ac:name=["\']name["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
+            # Paramètres alternatifs DC
+            filename_param = re.search(r'<ac:parameter[^>]*ac:name=["\']filename["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
+            id_param = re.search(r'<ac:parameter[^>]*ac:name=["\']id["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
             
             att_id = image_att_id.group(1).strip() if image_att_id else None
             diagram_att_id_value = diagram_att_id.group(1).strip() if diagram_att_id else None
             macro_id_value = macro_id.group(1).strip() if macro_id else None
             diagram_name = name_param.group(1).strip() if name_param else None
             
+            # Si on n'a toujours pas d'ID d'attachement ou si c'est 'test' (placeholder DC)
+            if not att_id or att_id == 'test':
+                if id_param and id_param.group(1).strip() != 'test':
+                    att_id = id_param.group(1).strip()
+                elif name_param:
+                    att_id = name_param.group(1).strip()
+                elif filename_param:
+                    att_id = filename_param.group(1).strip()
+                elif id_param: # Fallback sur 'test'
+                    att_id = id_param.group(1).strip()
+
+            if not diagram_att_id_value or diagram_att_id_value == 'test':
+                diagram_att_id_value = diagram_att_id.group(1).strip() if diagram_att_id else att_id
+
             if att_id or diagram_att_id_value:
                 gliffy_attachments.append({
                     'attachmentId': att_id,
@@ -226,7 +243,10 @@ class GliffyProcessor:
             if is_draft:
                 params['status'] = 'draft'
             
-            download_response = self.session.get(download_api_url, params=params, headers={}, timeout=30)
+            # Utiliser un header Accept large pour le téléchargement binaire
+            # et outrepasser le Accept: application/json de la session
+            headers = {'Accept': '*/*'}
+            download_response = self.session.get(download_api_url, params=params, headers=headers, timeout=30)
             
             if download_response.status_code == 200:
                 content = download_response.content
@@ -248,7 +268,7 @@ class GliffyProcessor:
             if attachment_id.startswith('att'):
                 attachment_id_no_prefix = attachment_id[3:]
                 download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id_no_prefix}/download"
-                download_response = self.session.get(download_api_url, params=params, headers={}, timeout=30)
+                download_response = self.session.get(download_api_url, params=params, headers=headers, timeout=30)
                 
                 if download_response.status_code == 200:
                     content = download_response.content

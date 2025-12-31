@@ -257,3 +257,41 @@ class ConfluenceBase:
         
         return None
 
+    def get_attachments(self, page_id: str) -> List[Dict]:
+        """
+        Récupère tous les attachments d'une page.
+        
+        Args:
+            page_id: ID de la page Confluence
+            
+        Returns:
+            List[Dict]: Liste des attachments
+        """
+        attachments = []
+        start = 0
+        limit = 100
+        
+        while True:
+            url = f"{self.api_base}/content/{page_id}/child/attachment"
+            params = {'start': start, 'limit': limit}
+            
+            try:
+                response = self.session.get(url, params=params)
+                if response.status_code != 200:
+                    break
+                data = response.json()
+                results = data.get('results', [])
+                if not results:
+                    break
+                
+                attachments.extend(results)
+                
+                if len(results) < limit:
+                    break
+                
+                start += limit
+            except Exception:
+                break
+                
+        return attachments
+

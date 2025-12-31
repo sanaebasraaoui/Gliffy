@@ -96,7 +96,7 @@ class GliffyMigrator(ConfluenceBase):
         """Récupère les détails d'une page spécifique."""
         return super().get_page_details(page_id, expand='body.storage,space,version')
     
-    def extract_gliffy_attachments_from_content(self, body_storage: str) -> List[Dict]:
+    def extract_gliffy_attachments_from_content(self, body_storage: str, page_id: str = "Inconnue") -> List[Dict]:
         """Extrait les IDs d'attachments Gliffy depuis le contenu d'une page."""
         gliffy_attachments = []
         
@@ -117,24 +117,40 @@ class GliffyMigrator(ConfluenceBase):
             att_id = image_att_id.group(1).strip() if image_att_id else None
             diagram_att_id_value = diagram_att_id.group(1).strip() if diagram_att_id else None
             
-            # Si on n'a toujours pas d'ID d'attachement, on essaie d'utiliser les autres paramètres trouvés
-            if not att_id and not diagram_att_id_value:
-                # Sur DC, le 'name' ou 'filename' est souvent l'ID ou le nom du fichier
-                if name_param:
+            # Si on n'a toujours pas d'ID d'attachement ou si c'est 'test' (placeholder DC), on essaie d'utiliser les autres paramètres trouvés
+            if not att_id or att_id == 'test':
+                if id_param and id_param.group(1).strip() != 'test':
+                    att_id = id_param.group(1).strip()
+                elif name_param:
                     att_id = name_param.group(1).strip()
                 elif filename_param:
                     att_id = filename_param.group(1).strip()
-                elif id_param:
+                elif id_param: # Fallback sur 'test' si vraiment rien d'autre
                     att_id = id_param.group(1).strip()
+
+            if not diagram_att_id_value or diagram_att_id_value == 'test':
+                if diagram_att_id:
+                    diagram_att_id_value = diagram_att_id.group(1).strip()
+                else:
+                    diagram_att_id_value = att_id
 
             macro_id_value = macro_id_param.group(1).strip() if macro_id_param else None
             diagram_name = name_param.group(1).strip() if name_param else None
             
             # On ajoute à la liste si on a trouvé AU MOINS une info permettant d'identifier le Gliffy
             if att_id or diagram_att_id_value or diagram_name or macro_id_value:
-                # Debug : logger les IDs suspects
-                if att_id == 'test' or diagram_att_id_value == 'test':
-                    print(f"  ⚠️  Macro Gliffy avec ID suspect 'test' trouvée sur la page")
+                # Debug : logger les IDs suspects ou les infos sur DC
+                if att_id == 'test' or diagram_att_id_value == 'test' or not (att_id or diagram_att_id_value):
+                    print(f"  🔍 Macro Gliffy détectée sur la page '{page_id}':")
+                    if image_att_id: print(f"     - imageAttachmentId: {image_att_id.group(1)}")
+                    if diagram_att_id: print(f"     - diagramAttachmentId: {diagram_att_id.group(1)}")
+                    if name_param: print(f"     - name: {name_param.group(1)}")
+                    if filename_param: print(f"     - filename: {filename_param.group(1)}")
+                    if id_param: print(f"     - id: {id_param.group(1)}")
+                    if macro_id_param: print(f"     - macroId: {macro_id_param.group(1)}")
+                    
+                    if att_id == 'test' or diagram_att_id_value == 'test':
+                        print(f"  ℹ️  Valeur 'test' détectée. Sur Data Center, le script va tenter de résoudre l'image par son nom.")
 
                 gliffy_attachments.append({
                     'attachmentId': att_id,
@@ -431,7 +447,10 @@ class GliffyMigrator(ConfluenceBase):
             if is_draft:
                 params['status'] = 'draft'
             
-            download_response = self.session.get(download_api_url, params=params, timeout=30)
+            # Utiliser un header Accept large pour le téléchargement binaire
+            # et outrepasser le Accept: application/json de la session
+            headers = {'Accept': '*/*'}
+            download_response = self.session.get(download_api_url, params=params, headers=headers, timeout=30)
             
             if download_response.status_code == 200:
                 content = download_response.content
@@ -454,7 +473,7 @@ class GliffyMigrator(ConfluenceBase):
             if attachment_id.startswith('att'):
                 attachment_id_no_prefix = attachment_id[3:]
                 download_api_url = f"{self.api_base}/content/{page_id}/child/attachment/{attachment_id_no_prefix}/download"
-                download_response = self.session.get(download_api_url, params=params, timeout=30)
+                download_response = self.session.get(download_api_url, params=params, headers=headers, timeout=30)
                 
                 if download_response.status_code == 200:
                     content = download_response.content
@@ -472,6 +491,21 @@ class GliffyMigrator(ConfluenceBase):
                         last_error = f"Contenu invalide (404/Missing) pour l'attachment {attachment_id_no_prefix}"
                 else:
                     last_error = f"HTTP {download_response.status_code} (avec et sans préfixe 'att')"
+            
+            # Nouveau fallback pour Data Center : si l'ID n'est pas numérique, essayer de trouver par nom
+            if attachment_id and not attachment_id.isdigit() and not attachment_id.startswith('att'):
+                # Chercher parmi tous les attachments de la page
+                # print(f"     🔍 Recherche de l'attachment par nom '{attachment_id}' (Data Center fallback)...")
+                page_attachments = self.get_attachments(page_id)
+                for att in page_attachments:
+                    att_title = att.get('title', '')
+                    # Gliffy nomme ses images diagram-name.png ou diagram-name.svg
+                    # On vérifie si le titre commence par le nom du diagramme
+                    if att_title.startswith(attachment_id) and (att_title.endswith('.png') or att_title.endswith('.svg')):
+                        att_real_id = att.get('id')
+                        if att_real_id:
+                            # print(f"     ✅ Trouvé ID {att_real_id} pour '{att_title}'")
+                            return self.download_attachment_direct(page_id, att_real_id, is_draft)
             
             return (None, None, last_error or "Échec du téléchargement")
             
@@ -634,7 +668,7 @@ class GliffyMigrator(ConfluenceBase):
                 'images_inserted': 0
             }
         
-        gliffy_attachments = self.extract_gliffy_attachments_from_content(body_storage)
+        gliffy_attachments = self.extract_gliffy_attachments_from_content(body_storage, page_id)
         
         if not gliffy_attachments:
             return {
