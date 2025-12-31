@@ -104,20 +104,37 @@ class GliffyMigrator(ConfluenceBase):
         gliffy_macros = re.findall(gliffy_macro_pattern, body_storage, re.DOTALL | re.IGNORECASE)
         
         for macro in gliffy_macros:
+            # Paramètres standards Cloud
             image_att_id = re.search(r'<ac:parameter[^>]*ac:name=["\']imageAttachmentId["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
             diagram_att_id = re.search(r'<ac:parameter[^>]*ac:name=["\']diagramAttachmentId["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
-            macro_id = re.search(r'<ac:parameter[^>]*ac:name=["\']macroId["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
+            
+            # Paramètres alternatifs (souvent sur Data Center)
             name_param = re.search(r'<ac:parameter[^>]*ac:name=["\']name["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
+            filename_param = re.search(r'<ac:parameter[^>]*ac:name=["\']filename["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
+            id_param = re.search(r'<ac:parameter[^>]*ac:name=["\']id["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
+            macro_id_param = re.search(r'<ac:parameter[^>]*ac:name=["\']macroId["\'][^>]*>([^<]+)</ac:parameter>', macro, re.IGNORECASE)
             
             att_id = image_att_id.group(1).strip() if image_att_id else None
             diagram_att_id_value = diagram_att_id.group(1).strip() if diagram_att_id else None
-            macro_id_value = macro_id.group(1).strip() if macro_id else None
+            
+            # Si on n'a toujours pas d'ID d'attachement, on essaie d'utiliser les autres paramètres trouvés
+            if not att_id and not diagram_att_id_value:
+                # Sur DC, le 'name' ou 'filename' est souvent l'ID ou le nom du fichier
+                if name_param:
+                    att_id = name_param.group(1).strip()
+                elif filename_param:
+                    att_id = filename_param.group(1).strip()
+                elif id_param:
+                    att_id = id_param.group(1).strip()
+
+            macro_id_value = macro_id_param.group(1).strip() if macro_id_param else None
             diagram_name = name_param.group(1).strip() if name_param else None
             
-            if att_id or diagram_att_id_value:
+            # On ajoute à la liste si on a trouvé AU MOINS une info permettant d'identifier le Gliffy
+            if att_id or diagram_att_id_value or diagram_name or macro_id_value:
                 gliffy_attachments.append({
                     'attachmentId': att_id,
-                    'diagramAttachmentId': diagram_att_id_value,
+                    'diagramAttachmentId': diagram_att_id_value or att_id,
                     'macroId': macro_id_value,
                     'diagramName': diagram_name,
                     'macroHtml': macro
