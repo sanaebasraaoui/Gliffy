@@ -21,7 +21,7 @@ from typing import List, Dict, Optional
 class ConfluenceBase:
     """Classe de base pour les opérations Confluence."""
     
-    def __init__(self, confluence_url: str, username: str, api_token: str):
+    def __init__(self, confluence_url: str, username: Optional[str], api_token: str):
         """Initialise la connexion Confluence."""
         self.confluence_url = confluence_url.rstrip('/')
         self.username = username
@@ -31,6 +31,8 @@ class ConfluenceBase:
         is_cloud = 'atlassian.net' in self.confluence_url.lower()
         
         if is_cloud:
+            if not username:
+                raise ValueError("❌ L'adresse email (--username) est obligatoire pour Confluence Cloud.")
             # Atlassian Cloud
             if '/wiki' in self.confluence_url.lower():
                 self.api_base = f"{self.confluence_url.rstrip('/wiki')}/wiki/rest/api"
@@ -47,14 +49,25 @@ class ConfluenceBase:
         if is_cloud:
             # Cloud utilise Basic Auth (Email + API Token)
             self.session.auth = (username, api_token)
-            auth_type = "Basic (Cloud)"
+            auth_strategy = "Basic (Cloud)"
         else:
-            # Data Center utilise souvent Bearer Auth pour les PAT (Personal Access Tokens)
-            # On n'utilise pas self.session.auth pour Bearer, on l'ajoute aux headers
-            self.session.headers.update({
-                'Authorization': f'Bearer {api_token}'
-            })
-            auth_type = "Bearer (Data Center PAT)"
+            # Data Center
+            if username:
+                # Si un username est fourni, on peut utiliser Basic (User + Password/PAT)
+                self.session.auth = (username, api_token)
+                auth_strategy = "Basic (Data Center)"
+            else:
+                # Si pas de username, on utilise obligatoirement Bearer (PAT seul)
+                self.session.headers.update({
+                    'Authorization': f'Bearer {api_token}'
+                })
+                auth_strategy = "Bearer (Data Center PAT)"
+            
+        self.session.verify = True
+        self.session.headers.update({
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        })
             
         self.session.verify = True
         self.session.headers.update({

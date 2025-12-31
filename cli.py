@@ -41,8 +41,8 @@ def parse_common_args(parser):
     )
     parser.add_argument(
         '--username',
-        required=True,
-        help='Nom d\'utilisateur ou email Confluence'
+        required=False,
+        help='Nom d\'utilisateur ou email Confluence (requis pour Cloud, optionnel pour PAT Data Center)'
     )
     parser.add_argument(
         '--token',
