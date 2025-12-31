@@ -494,18 +494,32 @@ class GliffyMigrator(ConfluenceBase):
             
             # Nouveau fallback pour Data Center : si l'ID n'est pas numérique, essayer de trouver par nom
             if attachment_id and not attachment_id.isdigit() and not attachment_id.startswith('att'):
-                # Chercher parmi tous les attachments de la page
-                # print(f"     🔍 Recherche de l'attachment par nom '{attachment_id}' (Data Center fallback)...")
+                print(f"     🔍 Recherche de l'attachment par nom '{attachment_id}' (Data Center fallback)...")
                 page_attachments = self.get_attachments(page_id)
+                
+                # Nettoyer le nom au cas où (supprimer les éventuels tags HTML si mal extraits)
+                search_name = attachment_id.strip()
+                
+                # Chercher une correspondance exacte d'abord
                 for att in page_attachments:
-                    att_title = att.get('title', '')
-                    # Gliffy nomme ses images diagram-name.png ou diagram-name.svg
-                    # On vérifie si le titre commence par le nom du diagramme
-                    if att_title.startswith(attachment_id) and (att_title.endswith('.png') or att_title.endswith('.svg')):
+                    title = att.get('title', '')
+                    if title == search_name or title == f"{search_name}.png" or title == f"{search_name}.svg" or title == f"{search_name}.gliffy":
                         att_real_id = att.get('id')
                         if att_real_id:
-                            # print(f"     ✅ Trouvé ID {att_real_id} pour '{att_title}'")
+                            print(f"     ✅ Trouvé ID {att_real_id} pour '{title}'")
                             return self.download_attachment_direct(page_id, att_real_id, is_draft)
+                
+                # Sinon chercher si le nom est contenu dans le titre (plus souple)
+                for att in page_attachments:
+                    title = att.get('title', '').lower()
+                    sn_lower = search_name.lower()
+                    if (sn_lower in title) and (title.endswith('.png') or title.endswith('.svg') or title.endswith('.gliffy')):
+                        att_real_id = att.get('id')
+                        if att_real_id:
+                            print(f"     ✅ Trouvé ID {att_real_id} par recherche souple pour '{att.get('title')}'")
+                            return self.download_attachment_direct(page_id, att_real_id, is_draft)
+                
+                print(f"     ❌ Impossible de trouver un attachment correspondant à '{search_name}'")
             
             return (None, None, last_error or "Échec du téléchargement")
             

@@ -115,6 +115,30 @@ class GliffyDownloader:
         
         return gliffy_attachments
 
+    def get_attachments(self, page_id: str) -> List[Dict]:
+        """Récupère tous les attachments d'une page."""
+        attachments = []
+        start = 0
+        limit = 100
+        while True:
+            url = f"{self.api_base}/content/{page_id}/child/attachment"
+            params = {'start': start, 'limit': limit}
+            try:
+                response = self.session.get(url, params=params, timeout=30)
+                if response.status_code != 200:
+                    break
+                data = response.json()
+                results = data.get('results', [])
+                if not results:
+                    break
+                attachments.extend(results)
+                if len(results) < limit:
+                    break
+                start += limit
+            except Exception:
+                break
+        return attachments
+
     def download_attachment_direct(self, page_id: str, attachment_id: str, is_draft: bool = False) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
         """
         Télécharge un attachment directement via l'API REST.
@@ -171,6 +195,28 @@ class GliffyDownloader:
                 else:
                     last_error = f"HTTP {download_response.status_code} (avec et sans préfixe 'att')"
             
+            # Fallback pour Data Center : si l'ID n'est pas numérique, essayer de trouver par nom
+            if attachment_id and not attachment_id.isdigit() and not attachment_id.startswith('att'):
+                page_attachments = self.get_attachments(page_id)
+                search_name = attachment_id.strip()
+                
+                # Correspondance exacte
+                for att in page_attachments:
+                    title = att.get('title', '')
+                    if title == search_name or title == f"{search_name}.png" or title == f"{search_name}.svg" or title == f"{search_name}.gliffy":
+                        att_real_id = att.get('id')
+                        if att_real_id:
+                            return self.download_attachment_direct(page_id, att_real_id, is_draft)
+                
+                # Recherche souple
+                for att in page_attachments:
+                    title = att.get('title', '').lower()
+                    sn_lower = search_name.lower()
+                    if (sn_lower in title) and (title.endswith('.png') or title.endswith('.svg') or title.endswith('.gliffy')):
+                        att_real_id = att.get('id')
+                        if att_real_id:
+                            return self.download_attachment_direct(page_id, att_real_id, is_draft)
+
             return (None, None, last_error or "Échec")
             
         except Exception as e:
@@ -226,9 +272,28 @@ class GliffyDownloader:
                                     return gliffy_data
                             except json.JSONDecodeError:
                                 pass
-                except Exception as e:
+                except Exception:
                     continue
         
+        # Fallback pour Data Center : si l'ID n'est pas numérique, essayer de trouver par nom
+        if diagram_attachment_id and not diagram_attachment_id.isdigit() and not diagram_attachment_id.startswith('att'):
+            page_attachments = self.get_attachments(page_id)
+            search_name = diagram_attachment_id.strip()
+            for att in page_attachments:
+                title = att.get('title', '')
+                if title == search_name or title == f"{search_name}.gliffy":
+                    att_real_id = att.get('id')
+                    if att_real_id:
+                        return self.download_gliffy_json(page_id, att_real_id, is_draft)
+            
+            for att in page_attachments:
+                title = att.get('title', '').lower()
+                sn_lower = search_name.lower()
+                if (sn_lower in title) and title.endswith('.gliffy'):
+                    att_real_id = att.get('id')
+                    if att_real_id:
+                        return self.download_gliffy_json(page_id, att_real_id, is_draft)
+
         return None
 
     def insert_image_after_macro(self, page_id: str, page_title: str, space_key: str, image_content: bytes, mime_type: str, diagram_name: Optional[str], macro_html: str, is_draft: bool = False, current_body: Optional[str] = None) -> Tuple[bool, Optional[str]]:
