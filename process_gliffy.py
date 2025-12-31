@@ -34,7 +34,11 @@ class GliffyProcessor:
         self.username = username
         self.api_token = api_token
         self.excalidraw_output_dir = Path(excalidraw_output_dir)
-        self.excalidraw_output_dir.mkdir(exist_ok=True)
+        try:
+            self.excalidraw_output_dir.mkdir(exist_ok=True)
+        except (PermissionError, OSError):
+            print(f"⚠️ Impossible de créer le dossier {excalidraw_output_dir}, utilisation du dossier courant.")
+            self.excalidraw_output_dir = Path(".")
         self.spaces_filter = set(spaces) if spaces else None
         
         # Détecter si c'est Atlassian Cloud

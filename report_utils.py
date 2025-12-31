@@ -25,36 +25,23 @@ REPORTS_DIR = Path("reports")
 
 
 def ensure_reports_dir():
-    """Garantit que le dossier reports existe sans tenter de le recréer s'il est déjà là."""
+    """Garantit que le dossier reports existe, sinon retourne le dossier courant."""
     if not REPORTS_DIR.exists():
         try:
             REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            # Si on n'a pas la permission de créer le dossier, 
-            # on espère qu'il existe déjà ou on échouera plus tard proprement
-            pass
+            return REPORTS_DIR
+        except (PermissionError, OSError):
+            # Si on ne peut pas créer le dossier, on utilise le dossier courant (.)
+            return Path(".")
     return REPORTS_DIR
 
-
 def add_timestamp_to_filename(filename: str) -> str:
-    """
-    Ajoute un horodatage au nom de fichier pour éviter l'écrasement.
-    
-    Args:
-        filename: Nom de fichier (avec ou sans extension)
-        
-    Returns:
-        Nom de fichier avec horodatage (ex: gliffy_pages_2025-12-24_15-30-45.txt)
-    """
+    """Ajoute un horodatage au nom de fichier."""
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     path = Path(filename)
-    
     if path.suffix:
-        # Fichier avec extension
         return f"{path.stem}_{timestamp}{path.suffix}"
-    else:
-        # Fichier sans extension
-        return f"{filename}_{timestamp}"
+    return f"{filename}_{timestamp}"
 
 
 def export_gliffy_pages_txt(pages_data: List[Dict], output_file: str = "gliffy_pages.txt"):

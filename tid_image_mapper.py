@@ -58,7 +58,12 @@ class TIDImageMapper:
                 # Si c'est un chemin relatif, le convertir en chemin absolu
                 image_path_obj = Path(image_path)
                 if not image_path_obj.is_absolute():
-                    image_path_obj = self.images_dir / image_path_obj
+                    # Utiliser le dossier d'images seulement s'il existe
+                    if self.images_dir.exists():
+                        image_path_obj = self.images_dir / image_path_obj
+                    else:
+                        # Sinon essayer dans le dossier courant
+                        image_path_obj = Path(image_path)
                 
                 if image_path_obj.exists():
                     return str(image_path_obj)
