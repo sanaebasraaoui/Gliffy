@@ -16,6 +16,7 @@ Tous les rapports sont sauvegardés dans le dossier 'reports/' avec horodatage.
 Auteur: Sanae Basraoui
 """
 
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
@@ -25,15 +26,20 @@ REPORTS_DIR = Path("reports")
 
 
 def ensure_reports_dir():
-    """Garantit que le dossier reports existe, sinon retourne le dossier courant."""
+    """Garantit que le dossier reports existe et est accessible en écriture, sinon retourne le dossier courant."""
+    # 1. Tenter de créer le dossier s'il n'existe pas
     if not REPORTS_DIR.exists():
         try:
             REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            return REPORTS_DIR
         except (PermissionError, OSError):
-            # Si on ne peut pas créer le dossier, on utilise le dossier courant (.)
             return Path(".")
-    return REPORTS_DIR
+    
+    # 2. Vérifier si le dossier est accessible en écriture
+    if os.access(REPORTS_DIR, os.W_OK):
+        return REPORTS_DIR
+    
+    # 3. Fallback sur le dossier courant si "reports" n'est pas scriptable
+    return Path(".")
 
 def add_timestamp_to_filename(filename: str) -> str:
     """Ajoute un horodatage au nom de fichier."""
@@ -54,31 +60,34 @@ def export_gliffy_pages_txt(pages_data: List[Dict], output_file: str = "gliffy_p
     timestamped_filename = add_timestamp_to_filename(output_file)
     output_path = reports_dir / timestamped_filename
     
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 80 + "\n")
-        f.write("RAPPORT DES PAGES CONFLUENCE AVEC GLIFFY\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(f"Date de génération: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Nombre total de pages: {len(pages_data)}\n\n")
-        f.write("=" * 80 + "\n\n")
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("RAPPORT DES PAGES CONFLUENCE AVEC GLIFFY\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Date de génération: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Nombre total de pages: {len(pages_data)}\n\n")
+            f.write("=" * 80 + "\n\n")
+            
+            for idx, page in enumerate(pages_data, 1):
+                f.write(f"PAGE {idx}/{len(pages_data)}\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"Titre: {page.get('title', 'Sans titre')}\n")
+                f.write(f"ID: {page.get('id', 'N/A')}\n")
+                f.write(f"Espace: {page.get('space_name', 'N/A')} ({page.get('space_key', 'N/A')})\n")
+                f.write(f"Statut: {page.get('status', 'N/A')}\n")
+                f.write(f"URL: {page.get('url', 'N/A')}\n")
+                
+                if 'macros' in page and page['macros']:
+                    f.write(f"Macros Gliffy trouvées: {', '.join(page['macros'])}\n")
+                else:
+                    f.write("Macros Gliffy: Aucune\n")
+                
+                f.write("\n")
         
-        for idx, page in enumerate(pages_data, 1):
-            f.write(f"PAGE {idx}/{len(pages_data)}\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"Titre: {page.get('title', 'Sans titre')}\n")
-            f.write(f"ID: {page.get('id', 'N/A')}\n")
-            f.write(f"Espace: {page.get('space_name', 'N/A')} ({page.get('space_key', 'N/A')})\n")
-            f.write(f"Statut: {page.get('status', 'N/A')}\n")
-            f.write(f"URL: {page.get('url', 'N/A')}\n")
-            
-            if 'macros' in page and page['macros']:
-                f.write(f"Macros Gliffy trouvées: {', '.join(page['macros'])}\n")
-            else:
-                f.write("Macros Gliffy: Aucune\n")
-            
-            f.write("\n")
-    
-    print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+        print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+    except (PermissionError, OSError) as e:
+        print(f"⚠️ Impossible de sauvegarder le rapport {output_path.name}: {e}")
 
 
 def export_migration_report_txt(report_data: Dict, output_file: str = "migration_report.txt"):
@@ -95,52 +104,55 @@ def export_migration_report_txt(report_data: Dict, output_file: str = "migration
     pages = report_data.get('pages', [])
     timestamp = report_data.get('timestamp', datetime.now().isoformat())
     
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 80 + "\n")
-        f.write("RAPPORT DE MIGRATION GLIFFY\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(f"Date de migration: {timestamp}\n\n")
-        
-        f.write("STATISTIQUES GLOBALES\n")
-        f.write("-" * 80 + "\n")
-        f.write(f"Pages traitées: {stats.get('pages_processed', 0)}\n")
-        f.write(f"Pages modifiées: {stats.get('pages_modified', 0)}\n")
-        f.write(f"Pages ignorées: {stats.get('pages_skipped', 0)}\n")
-        f.write(f"Gliffy trouvés: {stats.get('gliffy_found', 0)}\n")
-        f.write(f"Images insérées: {stats.get('images_inserted', 0)}\n")
-        f.write(f"Erreurs: {stats.get('errors', 0)}\n\n")
-        
-        f.write("=" * 80 + "\n")
-        f.write("DÉTAILS PAR PAGE\n")
-        f.write("=" * 80 + "\n\n")
-        
-        for idx, page in enumerate(pages, 1):
-            f.write(f"PAGE {idx}/{len(pages)}\n")
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("RAPPORT DE MIGRATION GLIFFY\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Date de migration: {timestamp}\n\n")
+            
+            f.write("STATISTIQUES GLOBALES\n")
             f.write("-" * 80 + "\n")
-            f.write(f"Titre: {page.get('page_title', 'Sans titre')}\n")
-            f.write(f"ID: {page.get('page_id', 'N/A')}\n")
-            f.write(f"Statut: {page.get('status', 'N/A').upper()}\n")
+            f.write(f"Pages traitées: {stats.get('pages_processed', 0)}\n")
+            f.write(f"Pages modifiées: {stats.get('pages_modified', 0)}\n")
+            f.write(f"Pages ignorées: {stats.get('pages_skipped', 0)}\n")
+            f.write(f"Gliffy trouvés: {stats.get('gliffy_found', 0)}\n")
+            f.write(f"Images insérées: {stats.get('images_inserted', 0)}\n")
+            f.write(f"Erreurs: {stats.get('errors', 0)}\n\n")
             
-            if page.get('status') == 'modified':
-                f.write(f"✓ Page modifiée avec succès\n")
-                f.write(f"  • Gliffy trouvés: {page.get('gliffy_count', 0)}\n")
-                f.write(f"  • Images insérées: {page.get('images_inserted', 0)}\n")
-            elif page.get('status') == 'skipped':
-                f.write(f"⊘ Page ignorée\n")
-                f.write(f"  • Raison: {page.get('reason', 'N/A')}\n")
-            elif page.get('status') == 'error':
-                f.write(f"✗ Erreur lors du traitement\n")
-                f.write(f"  • Gliffy trouvés: {page.get('gliffy_count', 0)}\n")
-                f.write(f"  • Images insérées: {page.get('images_inserted', 0)}\n")
-                f.write(f"  • Raison: {page.get('reason', 'N/A')}\n")
-                if page.get('errors'):
-                    f.write(f"  • Erreurs détaillées:\n")
-                    for error in page['errors']:
-                        f.write(f"    - {error}\n")
+            f.write("=" * 80 + "\n")
+            f.write("DÉTAILS PAR PAGE\n")
+            f.write("=" * 80 + "\n\n")
             
-            f.write("\n")
-    
-    print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+            for idx, page in enumerate(pages, 1):
+                f.write(f"PAGE {idx}/{len(pages)}\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"Titre: {page.get('page_title', 'Sans titre')}\n")
+                f.write(f"ID: {page.get('page_id', 'N/A')}\n")
+                f.write(f"Statut: {page.get('status', 'N/A').upper()}\n")
+                
+                if page.get('status') == 'modified':
+                    f.write(f"✓ Page modifiée avec succès\n")
+                    f.write(f"  • Gliffy trouvés: {page.get('gliffy_count', 0)}\n")
+                    f.write(f"  • Images insérées: {page.get('images_inserted', 0)}\n")
+                elif page.get('status') == 'skipped':
+                    f.write(f"⊘ Page ignorée\n")
+                    f.write(f"  • Raison: {page.get('reason', 'N/A')}\n")
+                elif page.get('status') == 'error':
+                    f.write(f"✗ Erreur lors du traitement\n")
+                    f.write(f"  • Gliffy trouvés: {page.get('gliffy_count', 0)}\n")
+                    f.write(f"  • Images insérées: {page.get('images_inserted', 0)}\n")
+                    f.write(f"  • Raison: {page.get('reason', 'N/A')}\n")
+                    if page.get('errors'):
+                        f.write(f"  • Erreurs détaillées:\n")
+                        for error in page['errors']:
+                            f.write(f"    - {error}\n")
+                
+                f.write("\n")
+        
+        print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+    except (PermissionError, OSError) as e:
+        print(f"⚠️ Impossible de sauvegarder le rapport {output_path.name}: {e}")
 
 
 def export_tids_mapping_txt(tid_mapping: Dict, output_file: str = "tids_mapping.txt"):
@@ -156,35 +168,38 @@ def export_tids_mapping_txt(tid_mapping: Dict, output_file: str = "tids_mapping.
     # Trier par nombre d'occurrences (décroissant)
     sorted_tids = sorted(tid_mapping.items(), key=lambda x: x[1].get('count', 0), reverse=True)
     
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 80 + "\n")
-        f.write("MAPPING DES TID GLIFFY\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(f"Date de génération: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Nombre total de TID uniques: {len(tid_mapping)}\n\n")
-        f.write("=" * 80 + "\n\n")
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("MAPPING DES TID GLIFFY\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Date de génération: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Nombre total de TID uniques: {len(tid_mapping)}\n\n")
+            f.write("=" * 80 + "\n\n")
+            
+            total_occurrences = sum(info.get('count', 0) for info in tid_mapping.values())
+            f.write(f"Total d'occurrences: {total_occurrences}\n\n")
+            
+            for tid, info in sorted_tids:
+                f.write(f"TID: {tid}\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"  Occurrences: {info.get('count', 0)}\n")
+                
+                image_path = info.get('image_path')
+                if image_path:
+                    f.write(f"  Chemin image: {image_path}\n")
+                else:
+                    f.write(f"  Chemin image: Non défini\n")
+                
+                description = info.get('description', '').strip()
+                if description:
+                    f.write(f"  Description: {description}\n")
+                
+                f.write("\n")
         
-        total_occurrences = sum(info.get('count', 0) for info in tid_mapping.values())
-        f.write(f"Total d'occurrences: {total_occurrences}\n\n")
-        
-        for tid, info in sorted_tids:
-            f.write(f"TID: {tid}\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"  Occurrences: {info.get('count', 0)}\n")
-            
-            image_path = info.get('image_path')
-            if image_path:
-                f.write(f"  Chemin image: {image_path}\n")
-            else:
-                f.write(f"  Chemin image: Non défini\n")
-            
-            description = info.get('description', '').strip()
-            if description:
-                f.write(f"  Description: {description}\n")
-            
-            f.write("\n")
-    
-    print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+        print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+    except (PermissionError, OSError) as e:
+        print(f"⚠️ Impossible de sauvegarder le rapport {output_path.name}: {e}")
 
 
 def export_inventory_txt(inventory: List[Dict], output_file: str = "confluence_inventory.txt"):
@@ -205,52 +220,55 @@ def export_inventory_txt(inventory: List[Dict], output_file: str = "confluence_i
             pages_by_space[space_key] = []
         pages_by_space[space_key].append(page)
     
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 80 + "\n")
-        f.write("INVENTAIRE CONFLUENCE\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(f"Date de génération: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Nombre total de pages: {len(inventory)}\n")
-        f.write(f"Nombre d'espaces: {len(pages_by_space)}\n\n")
-        f.write("=" * 80 + "\n\n")
-        
-        for space_key, pages in sorted(pages_by_space.items()):
-            space_name = pages[0].get('space_name', space_key) if pages else space_key
-            f.write(f"ESPACE: {space_name} ({space_key})\n")
-            f.write("-" * 80 + "\n")
-            f.write(f"Nombre de pages: {len(pages)}\n\n")
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("INVENTAIRE CONFLUENCE\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Date de génération: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Nombre total de pages: {len(inventory)}\n")
+            f.write(f"Nombre d'espaces: {len(pages_by_space)}\n\n")
+            f.write("=" * 80 + "\n\n")
             
-            for page in pages:
-                f.write(f"  • {page.get('title', 'Sans titre')}\n")
-                f.write(f"    ID: {page.get('id', 'N/A')}\n")
-                f.write(f"    Statut: {page.get('status', 'N/A')}\n")
-                f.write(f"    Version: {page.get('version', 'N/A')}\n")
-                f.write(f"    URL: {page.get('url', 'N/A')}\n")
-                f.write(f"    Créé le: {page.get('created_date', 'N/A')} par {page.get('created_by', 'N/A')}\n")
-                last_updated_date = page.get('last_updated_date', '')
-                last_updated_by = page.get('last_updated_by', '')
-                if last_updated_date and last_updated_by:
-                    f.write(f"    Modifié le: {last_updated_date} par {last_updated_by}\n")
-                elif last_updated_date:
-                    f.write(f"    Modifié le: {last_updated_date}\n")
-                else:
-                    f.write(f"    Modifié le: Jamais modifiée\n")
-                if page.get('parent_title'):
-                    f.write(f"    Page parent: {page.get('parent_title')} (ID: {page.get('parent_id', 'N/A')})\n")
+            for space_key, pages in sorted(pages_by_space.items()):
+                space_name = pages[0].get('space_name', space_key) if pages else space_key
+                f.write(f"ESPACE: {space_name} ({space_key})\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"Nombre de pages: {len(pages)}\n\n")
                 
-                # Informations Gliffy
-                gliffy_count = page.get('gliffy_count', 0)
-                gliffy_titles = page.get('gliffy_titles', [])
-                if gliffy_count > 0:
-                    f.write(f"    Gliffy : {gliffy_count}\n")
-                    for title in gliffy_titles:
-                        f.write(f"    - {title}\n")
-                else:
-                    f.write(f"    Gliffy : Aucun\n")
+                for page in pages:
+                    f.write(f"  • {page.get('title', 'Sans titre')}\n")
+                    f.write(f"    ID: {page.get('id', 'N/A')}\n")
+                    f.write(f"    Statut: {page.get('status', 'N/A')}\n")
+                    f.write(f"    Version: {page.get('version', 'N/A')}\n")
+                    f.write(f"    URL: {page.get('url', 'N/A')}\n")
+                    f.write(f"    Créé le: {page.get('created_date', 'N/A')} par {page.get('created_by', 'N/A')}\n")
+                    last_updated_date = page.get('last_updated_date', '')
+                    last_updated_by = page.get('last_updated_by', '')
+                    if last_updated_date and last_updated_by:
+                        f.write(f"    Modifié le: {last_updated_date} par {last_updated_by}\n")
+                    elif last_updated_date:
+                        f.write(f"    Modifié le: {last_updated_date}\n")
+                    else:
+                        f.write(f"    Modifié le: Jamais modifiée\n")
+                    if page.get('parent_title'):
+                        f.write(f"    Page parent: {page.get('parent_title')} (ID: {page.get('parent_id', 'N/A')})\n")
+                    
+                    # Informations Gliffy
+                    gliffy_count = page.get('gliffy_count', 0)
+                    gliffy_titles = page.get('gliffy_titles', [])
+                    if gliffy_count > 0:
+                        f.write(f"    Gliffy : {gliffy_count}\n")
+                        for title in gliffy_titles:
+                            f.write(f"    - {title}\n")
+                    else:
+                        f.write(f"    Gliffy : Aucun\n")
+                    
+                    f.write("\n")
                 
                 f.write("\n")
-            
-            f.write("\n")
-    
-    print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+        
+        print(f"💾 Rapport texte sauvegardé: {output_path.absolute()}")
+    except (PermissionError, OSError) as e:
+        print(f"⚠️ Impossible de sauvegarder le rapport {output_path.name}: {e}")
 
