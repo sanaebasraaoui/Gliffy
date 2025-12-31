@@ -25,8 +25,14 @@ REPORTS_DIR = Path("reports")
 
 
 def ensure_reports_dir():
-    """Crée le dossier reports s'il n'existe pas."""
-    REPORTS_DIR.mkdir(exist_ok=True)
+    """Garantit que le dossier reports existe sans tenter de le recréer s'il est déjà là."""
+    if not REPORTS_DIR.exists():
+        try:
+            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            # Si on n'a pas la permission de créer le dossier, 
+            # on espère qu'il existe déjà ou on échouera plus tard proprement
+            pass
     return REPORTS_DIR
 
 
